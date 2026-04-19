@@ -55,6 +55,7 @@ struct EvictCommand: ParsableCommand {
                 throw ValidationError("\(url.lastPathComponent) is a directory (use -r)")
             }
 
+            let rebase = PathResolver.Rebase(url)
             let filesToEvict: [ICloudFile]
             if isDir.boolValue {
                 let result = try Scanner.scan(directory: url, recursive: true) {
@@ -87,7 +88,7 @@ struct EvictCommand: ParsableCommand {
             }
 
             for file in filesToEvict {
-                let display = PathResolver.relativePath(file.url)
+                let display = PathResolver.relativePath(file.url, rebase: rebase)
                 let size = Output.humanSize(file.allocatedSize)
 
                 if dryRun {

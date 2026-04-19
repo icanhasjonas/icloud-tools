@@ -59,10 +59,11 @@ struct DownloadCommand: ParsableCommand {
             }
 
             if isDir.boolValue {
+                let rebase = PathResolver.Rebase(url)
                 let result = try Scanner.scan(directory: url, recursive: true) { $0.status == .cloud }
 
                 for file in result.files {
-                    let display = PathResolver.relativePath(file.url)
+                    let display = PathResolver.relativePath(file.url, rebase: rebase)
                     let size = Output.humanSize(file.fileSize)
 
                     if dryRun {

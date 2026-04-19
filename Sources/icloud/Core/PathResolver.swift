@@ -34,22 +34,33 @@ struct PathResolver {
         url.resolvingSymlinksInPath().path.hasPrefix(mobileDocuments)
     }
 
-    static func relativePath(_ url: URL) -> String {
-        let resolved = url.resolvingSymlinksInPath().path
-        let cwdRaw = FileManager.default.currentDirectoryPath
+    struct Rebase {
+        let resolved: String
+        let original: String
+
+        init(_ url: URL) {
+            self.resolved = url.resolvingSymlinksInPath().path
+            self.original = url.path
+        }
+    }
+
+    static func relativePath(_ url: URL, rebase: Rebase? = nil) -> String {
+        var rawPath = url.path
+        if let rebase, rawPath.hasPrefix(rebase.resolved) {
+            rawPath = rebase.original + String(rawPath.dropFirst(rebase.resolved.count))
+        }
+        let cwdRaw = FileManager.default.currentDirectoryPath + "/"
+        if rawPath.hasPrefix(cwdRaw) {
+            return String(rawPath.dropFirst(cwdRaw.count))
+        }
         let cwdResolved = URL(fileURLWithPath: cwdRaw).resolvingSymlinksInPath().path + "/"
-        if resolved.hasPrefix(cwdResolved) {
-            return String(resolved.dropFirst(cwdResolved.count))
+        if rawPath.hasPrefix(cwdResolved) {
+            return String(rawPath.dropFirst(cwdResolved.count))
         }
-        let rawCwd = cwdRaw + "/"
-        let rawPath = url.path
-        if rawPath.hasPrefix(rawCwd) {
-            return String(rawPath.dropFirst(rawCwd.count))
+        let home = FileManager.default.homeDirectoryForCurrentUser.path + "/"
+        if rawPath.hasPrefix(home) {
+            return "~/" + String(rawPath.dropFirst(home.count))
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if resolved.hasPrefix(home) {
-            return "~" + String(resolved.dropFirst(home.count))
-        }
-        return url.path
+        return rawPath
     }
 }

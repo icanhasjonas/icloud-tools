@@ -44,22 +44,23 @@ struct FileOperation {
 
             let srcDisplay = PathResolver.relativePath(srcURL)
 
-            if verbose && !json {
+            if verbose && !json && !srcIsDir.boolValue {
                 let size = Output.humanSize(fileInfo.fileSize)
                 let sizeStr = size.isEmpty ? "" : " \(Output.dim)(\(size))\(Output.reset)"
                 print("\(Output.dim)downloading\(Output.reset) \(srcDisplay)\(sizeStr)")
             }
 
             if srcIsDir.boolValue {
+                let rebase = PathResolver.Rebase(srcURL)
                 try Downloader.ensureLocalRecursive(srcURL) { event in
                     guard verbose && !json else { return }
                     switch event {
                     case .starting(let f):
-                        let display = PathResolver.relativePath(f.url)
+                        let display = PathResolver.relativePath(f.url, rebase: rebase)
                         let size = Output.humanSize(f.fileSize)
                         print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
                     case .done(let f):
-                        let display = PathResolver.relativePath(f.url)
+                        let display = PathResolver.relativePath(f.url, rebase: rebase)
                         print("  \(Output.green)done\(Output.reset) \(display)")
                     case .skipped:
                         break
