@@ -2,10 +2,16 @@ import Foundation
 
 struct ScanResult: Sendable {
     let files: [ICloudFile]
+    let localCount: Int
+    let cloudCount: Int
+    let downloadingCount: Int
+    let uploadingCount: Int
+    let totalEvictableSize: Int64
 
     var totalCount: Int { files.count }
 
-    private var _counts: (local: Int, cloud: Int, downloading: Int, uploading: Int, evictable: Int64) {
+    init(files: [ICloudFile]) {
+        self.files = files
         var local = 0, cloud = 0, downloading = 0, uploading = 0
         var evictable: Int64 = 0
         for file in files {
@@ -19,14 +25,12 @@ struct ScanResult: Sendable {
             case .excluded, .unknown: break
             }
         }
-        return (local, cloud, downloading, uploading, evictable)
+        self.localCount = local
+        self.cloudCount = cloud
+        self.downloadingCount = downloading
+        self.uploadingCount = uploading
+        self.totalEvictableSize = evictable
     }
-
-    var localCount: Int { _counts.local }
-    var cloudCount: Int { _counts.cloud }
-    var downloadingCount: Int { _counts.downloading }
-    var uploadingCount: Int { _counts.uploading }
-    var totalEvictableSize: Int64 { _counts.evictable }
 }
 
 struct Scanner {
@@ -39,20 +43,27 @@ struct Scanner {
         var files: [ICloudFile] = []
 
         if recursive {
+            var enumeratorError: Error?
             guard let enumerator = fm.enumerator(
                 at: directory,
                 includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
-                options: [.skipsHiddenFiles]
+                options: [.skipsHiddenFiles],
+                errorHandler: { _, error in
+                    enumeratorError = error
+                    return false
+                }
             ) else {
-                return ScanResult(files: [])
+                throw ScanError.enumerationFailed(directory.path)
             }
 
             for case let url as URL in enumerator {
+                if let err = enumeratorError { throw err }
                 let file = try ICloudFile.from(url: url)
                 if file.isDirectory { continue }
                 if let filter, !filter(file) { continue }
                 files.append(file)
             }
+            if let err = enumeratorError { throw err }
         } else {
             let contents = try fm.contentsOfDirectory(
                 at: directory,
@@ -68,5 +79,16 @@ struct Scanner {
         }
 
         return ScanResult(files: files)
+    }
+}
+
+enum ScanError: LocalizedError {
+    case enumerationFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .enumerationFailed(let path):
+            return "Cannot enumerate directory: \(path)"
+        }
     }
 }

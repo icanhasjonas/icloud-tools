@@ -5,14 +5,22 @@ enum DownloadEvent {
     case done(ICloudFile)
     case wouldDownload(ICloudFile)
     case skipped(ICloudFile)
+
+    var file: ICloudFile {
+        switch self {
+        case .starting(let f), .done(let f), .wouldDownload(let f), .skipped(let f): return f
+        }
+    }
 }
 
 struct Downloader {
     static func ensureLocal(_ file: ICloudFile, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
-        guard file.isUbiquitous && file.status == .cloud else { return }
+        guard file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) else { return }
         if dryRun { return }
 
-        try FileManager.default.startDownloadingUbiquitousItem(at: file.url)
+        if file.status == .cloud {
+            try FileManager.default.startDownloadingUbiquitousItem(at: file.url)
+        }
 
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -20,10 +28,12 @@ struct Downloader {
             let values = try fresh.resourceValues(forKeys: [
                 .ubiquitousItemDownloadingStatusKey,
                 .ubiquitousItemIsDownloadingKey,
+                .fileAllocatedSizeKey,
             ])
 
             let status = values.ubiquitousItemDownloadingStatus
-            if status == .current || status == .downloaded {
+            let allocated = values.fileAllocatedSize ?? 0
+            if (status == .current || status == .downloaded) && allocated > 0 {
                 return
             }
 
@@ -52,17 +62,26 @@ struct Downloader {
         }
 
         let fm = FileManager.default
+        var enumeratorError: Error?
         guard let enumerator = fm.enumerator(
             at: url,
             includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
-            options: [.skipsHiddenFiles]
-        ) else { return }
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, error in
+                enumeratorError = error
+                return false
+            }
+        ) else {
+            throw DownloadError.enumerationFailed(url.path)
+        }
 
         for case let fileURL as URL in enumerator {
+            if let err = enumeratorError { throw err }
             let child = try ICloudFile.from(url: fileURL, checkPin: false)
             if child.isDirectory { continue }
             try processOne(child, timeout: timeout, dryRun: dryRun, progress: progress)
         }
+        if let err = enumeratorError { throw err }
     }
 
     private static func processOne(
@@ -71,7 +90,7 @@ struct Downloader {
         dryRun: Bool,
         progress: ((DownloadEvent) -> Void)?
     ) throws {
-        if file.isUbiquitous && file.status == .cloud {
+        if file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) {
             if dryRun {
                 progress?(.wouldDownload(file))
             } else {
@@ -87,10 +106,12 @@ struct Downloader {
 
 enum DownloadError: LocalizedError {
     case timeout(String)
+    case enumerationFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .timeout(let name): return "Download timed out: \(name)"
+        case .enumerationFailed(let path): return "Cannot enumerate directory: \(path)"
         }
     }
 }

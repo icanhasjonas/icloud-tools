@@ -11,9 +11,7 @@ enum FileVerb {
         }
     }
 
-    var present: String { rawValue }
-
-    private var rawValue: String {
+    var present: String {
         switch self {
         case .move: return "move"
         case .copy: return "copy"
@@ -50,6 +48,10 @@ struct FileOperation {
             throw FileOperationError.destinationNotDirectory
         }
 
+        if force && noClobber {
+            throw FileOperationError.conflictingFlags
+        }
+
         for source in sources {
             let srcURL = PathResolver.resolve(source)
             var srcIsDir: ObjCBool = false
@@ -71,22 +73,11 @@ struct FileOperation {
 
             if srcIsDir.boolValue {
                 let rebase = PathResolver.Rebase(srcURL)
-                let srcResolved = srcURL.resolvingSymlinksInPath().path
                 try Downloader.ensureLocalRecursive(srcURL, dryRun: dryRun) { event in
                     guard verbose && !json else { return }
-                    let f: ICloudFile
-                    switch event {
-                    case .starting(let file): f = file
-                    case .done(let file): f = file
-                    case .wouldDownload(let file): f = file
-                    case .skipped(let file): f = file
-                    }
-
+                    let f = event.file
                     let display = PathResolver.relativePath(f.url, rebase: rebase)
                     let size = Output.humanSize(f.fileSize)
-                    let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
-                    let toURL = finalDest.appendingPathComponent(childRelative)
-                    let toDisplay = PathResolver.relativePath(toURL)
 
                     switch event {
                     case .starting:
@@ -102,7 +93,7 @@ struct FileOperation {
                     }
                 }
             } else {
-                let needsDownload = fileInfo.isUbiquitous && fileInfo.status == .cloud
+                let needsDownload = fileInfo.isUbiquitous && (fileInfo.status == .cloud || fileInfo.isDataless)
                 let size = Output.humanSize(fileInfo.fileSize)
 
                 if verbose && !json {
@@ -131,8 +122,30 @@ struct FileOperation {
                     continue
                 }
                 if force {
-                    if !dryRun {
-                        try fm.removeItem(at: finalDest)
+                    if dryRun {
+                        // don't delete in dry-run
+                    } else {
+                        // move existing dest to temp, operate, then clean up
+                        // if operation fails, restore dest from temp
+                        let tempDest = finalDest.deletingLastPathComponent()
+                            .appendingPathComponent(".\(finalDest.lastPathComponent).icloud-backup")
+                        try fm.moveItem(at: finalDest, to: tempDest)
+                        do {
+                            try operation(fm, srcURL, finalDest)
+                            try fm.removeItem(at: tempDest)
+                        } catch {
+                            try? fm.moveItem(at: tempDest, to: finalDest)
+                            throw error
+                        }
+
+                        if json {
+                            try Output.printJSONLine(FileOperationResult(
+                                source: srcURL.path, destination: finalDest.path,
+                                status: verb.past, size: fileInfo.fileSize))
+                        } else if verbose {
+                            print("\(Output.green)\(verb.past)\(Output.reset) \(srcDisplay) -> \(destDisplay)")
+                        }
+                        continue
                     }
                 } else {
                     throw FileOperationError.destinationExists(finalDest.path)
@@ -167,6 +180,7 @@ enum FileOperationError: LocalizedError {
     case destinationNotDirectory
     case destinationExists(String)
     case directoryRequiresRecursive(String)
+    case conflictingFlags
 
     var errorDescription: String? {
         switch self {
@@ -178,6 +192,8 @@ enum FileOperationError: LocalizedError {
             return "Destination exists: \(path) (use -f to overwrite)"
         case .directoryRequiresRecursive(let name):
             return "\(name) is a directory (use -r to copy recursively)"
+        case .conflictingFlags:
+            return "Cannot use --force and --no-clobber together."
         }
     }
 }
