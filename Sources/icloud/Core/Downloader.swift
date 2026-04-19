@@ -31,20 +31,16 @@ struct Downloader {
         timeout: TimeInterval = 300,
         progress: ((String, Bool) -> Void)? = nil
     ) throws {
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
+        let file = try ICloudFile.from(url: url, checkPin: false)
 
-        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else {
-            throw DownloadError.notFound(url.path)
-        }
-
-        if !isDir.boolValue {
+        if !file.isDirectory {
             progress?(url.lastPathComponent, false)
             try ensureLocal(url, timeout: timeout)
             progress?(url.lastPathComponent, true)
             return
         }
 
+        let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: url,
             includingPropertiesForKeys: [.isDirectoryKey, .isUbiquitousItemKey],
@@ -52,8 +48,8 @@ struct Downloader {
         ) else { return }
 
         for case let fileURL as URL in enumerator {
-            let values = try fileURL.resourceValues(forKeys: [.isDirectoryKey])
-            if values.isDirectory == true { continue }
+            let child = try ICloudFile.from(url: fileURL, checkPin: false)
+            if child.isDirectory { continue }
 
             progress?(fileURL.lastPathComponent, false)
             try ensureLocal(fileURL, timeout: timeout)

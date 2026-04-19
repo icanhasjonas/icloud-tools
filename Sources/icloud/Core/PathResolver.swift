@@ -6,28 +6,31 @@ struct PathResolver {
         return home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
     }()
 
+    static let mobileDocuments: String =
+        iCloudDriveRoot.deletingLastPathComponent().path
+
+    static func resolveDefault() -> URL {
+        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .standardized
+        if isUnderMobileDocuments(cwd) {
+            return cwd
+        }
+        return iCloudDriveRoot
+    }
+
     static func resolve(_ path: String?) -> URL {
-        guard let path else { return iCloudDriveRoot }
+        guard let path else { return resolveDefault() }
 
         if path.hasPrefix("icloud:") {
             let relative = String(path.dropFirst("icloud:".count))
-            return iCloudDriveRoot.appendingPathComponent(relative)
+            return iCloudDriveRoot.appendingPathComponent(relative).standardized
         }
 
         let expanded = NSString(string: path).expandingTildeInPath
-        let url = URL(fileURLWithPath: expanded)
-
-        if url.path.hasPrefix("/") {
-            return url
-        }
-
-        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent(path)
+        return URL(fileURLWithPath: expanded).standardized
     }
 
     static func isUnderMobileDocuments(_ url: URL) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let mobileDocuments = home.appendingPathComponent("Library/Mobile Documents").path
-        return url.path.hasPrefix(mobileDocuments)
+        url.resolvingSymlinksInPath().path.hasPrefix(mobileDocuments)
     }
 }

@@ -10,6 +10,21 @@ enum ICloudStatus: String, Sendable {
 }
 
 struct ICloudFile: Sendable {
+    static let resourceKeys: Set<URLResourceKey> = [
+        .isDirectoryKey,
+        .isUbiquitousItemKey,
+        .ubiquitousItemDownloadingStatusKey,
+        .ubiquitousItemIsDownloadingKey,
+        .ubiquitousItemDownloadRequestedKey,
+        .ubiquitousItemIsUploadedKey,
+        .ubiquitousItemIsUploadingKey,
+        .ubiquitousItemHasUnresolvedConflictsKey,
+        .ubiquitousItemIsSharedKey,
+        .ubiquitousItemIsExcludedFromSyncKey,
+        .fileSizeKey,
+        .fileAllocatedSizeKey,
+    ]
+
     let url: URL
     let name: String
     let isDirectory: Bool
@@ -17,37 +32,13 @@ struct ICloudFile: Sendable {
     let fileSize: Int64
     let allocatedSize: Int64
     let isUbiquitous: Bool
-    let isDownloading: Bool
-    let isUploading: Bool
-    let isShared: Bool
-    let hasConflicts: Bool
     let isPinned: Bool
-    let childCount: Int?
 
     var isDataless: Bool {
         fileSize > 0 && allocatedSize == 0
     }
 
-    var displaySize: String {
-        Output.humanSize(fileSize)
-    }
-
     static func from(url: URL, checkPin: Bool = true) throws -> ICloudFile {
-        let resourceKeys: Set<URLResourceKey> = [
-            .isDirectoryKey,
-            .isUbiquitousItemKey,
-            .ubiquitousItemDownloadingStatusKey,
-            .ubiquitousItemIsDownloadingKey,
-            .ubiquitousItemDownloadRequestedKey,
-            .ubiquitousItemIsUploadedKey,
-            .ubiquitousItemIsUploadingKey,
-            .ubiquitousItemHasUnresolvedConflictsKey,
-            .ubiquitousItemIsSharedKey,
-            .ubiquitousItemIsExcludedFromSyncKey,
-            .fileSizeKey,
-            .fileAllocatedSizeKey,
-        ]
-
         let values = try url.resourceValues(forKeys: resourceKeys)
         let isDir = values.isDirectory ?? false
         let isUbiquitous = values.isUbiquitousItem ?? false
@@ -67,18 +58,13 @@ struct ICloudFile: Sendable {
             case URLUbiquitousItemDownloadingStatus.notDownloaded:
                 status = .cloud
             default:
-                if !isUbiquitous {
-                    status = .local
-                } else {
-                    status = .unknown
-                }
+                status = isUbiquitous ? .unknown : .local
             }
         }
 
         var pinned = false
         if checkPin {
-            let path = url.path
-            pinned = getxattr(path, "com.apple.fileprovider.pinned#PX", nil, 0, 0, 0) >= 0
+            pinned = getxattr(url.path, "com.apple.fileprovider.pinned#PX", nil, 0, 0, 0) >= 0
         }
 
         return ICloudFile(
@@ -89,12 +75,7 @@ struct ICloudFile: Sendable {
             fileSize: Int64(values.fileSize ?? 0),
             allocatedSize: Int64(values.fileAllocatedSize ?? 0),
             isUbiquitous: isUbiquitous,
-            isDownloading: values.ubiquitousItemIsDownloading ?? false,
-            isUploading: values.ubiquitousItemIsUploading ?? false,
-            isShared: values.ubiquitousItemIsShared ?? false,
-            hasConflicts: values.ubiquitousItemHasUnresolvedConflicts ?? false,
-            isPinned: pinned,
-            childCount: nil
+            isPinned: pinned
         )
     }
 }
