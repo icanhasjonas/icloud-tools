@@ -1,6 +1,6 @@
 import Foundation
 
-enum ICloudStatus: String, Sendable {
+enum ICloudStatus: String, Sendable, Encodable {
     case local
     case cloud
     case downloading
@@ -9,7 +9,7 @@ enum ICloudStatus: String, Sendable {
     case unknown
 }
 
-struct ICloudFile: Sendable {
+struct ICloudFile: Sendable, Encodable {
     static let resourceKeys: Set<URLResourceKey> = [
         .isDirectoryKey,
         .isUbiquitousItemKey,
@@ -36,6 +36,24 @@ struct ICloudFile: Sendable {
 
     var isDataless: Bool {
         fileSize > 0 && allocatedSize == 0
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, path, isDirectory, status
+        case fileSize, allocatedSize, isUbiquitous, isPinned, isDataless
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(url.path, forKey: .path)
+        try container.encode(isDirectory, forKey: .isDirectory)
+        try container.encode(status, forKey: .status)
+        try container.encode(fileSize, forKey: .fileSize)
+        try container.encode(allocatedSize, forKey: .allocatedSize)
+        try container.encode(isUbiquitous, forKey: .isUbiquitous)
+        try container.encode(isPinned, forKey: .isPinned)
+        try container.encode(isDataless, forKey: .isDataless)
     }
 
     static func from(url: URL, checkPin: Bool = true) throws -> ICloudFile {

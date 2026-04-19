@@ -54,14 +54,19 @@ struct Output {
         let nameWidth = files.map(\.name.count).max() ?? 20
 
         for file in files {
-            let color = statusColor(file.status)
-            let label = statusLabel(file.status)
             let name = file.isDirectory ? file.name + "/" : file.name
-            let size = file.isDirectory ? "" : humanSize(file.fileSize)
-            let pin = file.isPinned ? " \(cyan)P\(reset)" : ""
-
             let padding = String(repeating: " ", count: max(0, nameWidth - name.count + 2))
-            print("  \(color)\(label)\(reset)   \(name)\(padding)\(dim)\(size)\(reset)\(pin)")
+
+            if file.isDirectory {
+                let pin = file.isPinned ? " \(cyan)P\(reset)" : ""
+                print("  \(dim) dir\(reset)   \(name)\(padding)\(reset)\(pin)")
+            } else {
+                let color = statusColor(file.status)
+                let label = statusLabel(file.status)
+                let size = humanSize(file.fileSize)
+                let pin = file.isPinned ? " \(cyan)P\(reset)" : ""
+                print("  \(color)\(label)\(reset)   \(name)\(padding)\(dim)\(size)\(reset)\(pin)")
+            }
         }
     }
 
@@ -83,5 +88,19 @@ struct Output {
             summary += "  \(dim)(\(humanSize(result.totalEvictableSize)) evictable)\(reset)"
         }
         print(summary)
+    }
+
+    static func printJSON(_ value: some Encodable) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(value)
+        print(String(data: data, encoding: .utf8)!)
+    }
+
+    static func printJSONLine(_ value: some Encodable) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(value)
+        print(String(data: data, encoding: .utf8)!)
     }
 }

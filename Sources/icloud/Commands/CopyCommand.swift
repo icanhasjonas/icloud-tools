@@ -22,6 +22,9 @@ struct CopyCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
+    @Flag(help: "Output as JSON.")
+    var json = false
+
     func validate() throws {
         guard paths.count >= 2 else {
             throw ValidationError("Usage: icloud cp <source...> <destination>")
@@ -35,7 +38,8 @@ struct CopyCommand: ParsableCommand {
             allowDirectories: recursive,
             force: force,
             noClobber: noClobber,
-            verbose: verbose
+            verbose: verbose,
+            json: json
         ) { fm, src, dest in
             try fm.copyItem(at: src, to: dest)
         }

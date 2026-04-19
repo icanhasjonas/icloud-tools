@@ -1,5 +1,11 @@
 import Foundation
 
+struct FileOperationResult: Encodable {
+    let source: String
+    let destination: String
+    let status: String
+}
+
 struct FileOperation {
     static func execute(
         paths: [String],
@@ -8,6 +14,7 @@ struct FileOperation {
         force: Bool,
         noClobber: Bool,
         verbose: Bool,
+        json: Bool,
         operation: (FileManager, URL, URL) throws -> Void
     ) throws {
         let fm = FileManager.default
@@ -32,13 +39,13 @@ struct FileOperation {
                 throw FileOperationError.directoryRequiresRecursive(srcURL.lastPathComponent)
             }
 
-            if verbose {
+            if verbose && !json {
                 print("\(Output.dim)downloading\(Output.reset) \(srcURL.lastPathComponent)")
             }
 
             if srcIsDir.boolValue {
                 try Downloader.ensureLocalRecursive(srcURL) { name, done in
-                    if verbose && done {
+                    if verbose && !json && done {
                         print("  \(Output.green)ready\(Output.reset) \(name)")
                     }
                 }
@@ -52,7 +59,10 @@ struct FileOperation {
 
             if fm.fileExists(atPath: finalDest.path) {
                 if noClobber {
-                    if verbose {
+                    if json {
+                        try Output.printJSONLine(FileOperationResult(
+                            source: srcURL.path, destination: finalDest.path, status: "skipped"))
+                    } else if verbose {
                         print("\(Output.yellow)skipped\(Output.reset) \(srcURL.lastPathComponent) (exists)")
                     }
                     continue
@@ -66,7 +76,10 @@ struct FileOperation {
 
             try operation(fm, srcURL, finalDest)
 
-            if verbose {
+            if json {
+                try Output.printJSONLine(FileOperationResult(
+                    source: srcURL.path, destination: finalDest.path, status: verb))
+            } else if verbose {
                 print("\(Output.green)\(verb)\(Output.reset) \(srcURL.lastPathComponent) -> \(finalDest.path)")
             }
         }

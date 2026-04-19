@@ -25,6 +25,9 @@ struct StatusCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Show resolved paths and debug info.")
     var verbose = false
 
+    @Flag(help: "Output as JSON.")
+    var json = false
+
     @Option(help: "Sort by: name, size, status.")
     var sort: SortField = .name
 
@@ -48,33 +51,54 @@ struct StatusCommand: ParsableCommand {
         }
 
         if !PathResolver.isUnderMobileDocuments(url) {
-            print("\(Output.yellow)Not an iCloud Drive path:\(Output.reset) \(url.path)")
-            print("\(Output.dim)iCloud Drive: \(PathResolver.iCloudDriveRoot.path)\(Output.reset)")
+            if json {
+                try Output.printJSON(StatusOutput(path: url.path, files: [], summary: nil,
+                                                   error: "Not an iCloud Drive path"))
+            } else {
+                print("\(Output.yellow)Not an iCloud Drive path:\(Output.reset) \(url.path)")
+                print("\(Output.dim)iCloud Drive: \(PathResolver.iCloudDriveRoot.path)\(Output.reset)")
+            }
             return
         }
 
         if !isDir.boolValue {
             let file = try ICloudFile.from(url: url)
-            Output.printFileTable([file])
+            if json {
+                try Output.printJSON(StatusOutput(path: url.path, files: [file], summary: nil))
+            } else {
+                Output.printFileTable([file])
+            }
             return
         }
 
         let filter: ((ICloudFile) -> Bool)? = buildFilter()
-
-        let result = try Scanner.scan(
-            directory: url,
-            recursive: recursive,
-            filter: filter
-        )
+        let result = try Scanner.scan(directory: url, recursive: recursive, filter: filter)
 
         if result.files.isEmpty {
-            print("No files found.")
+            if json {
+                try Output.printJSON(StatusOutput(path: url.path, files: [], summary: nil))
+            } else {
+                print("No files found.")
+            }
             return
         }
 
         let sorted = sortFiles(result.files)
-        Output.printFileTable(sorted)
-        Output.printSummary(result)
+
+        if json {
+            let summary = StatusSummary(
+                total: result.totalCount,
+                local: result.localCount,
+                cloud: result.cloudCount,
+                downloading: result.downloadingCount,
+                uploading: result.uploadingCount,
+                evictableBytes: result.totalEvictableSize
+            )
+            try Output.printJSON(StatusOutput(path: url.path, files: sorted, summary: summary))
+        } else {
+            Output.printFileTable(sorted)
+            Output.printSummary(result)
+        }
     }
 
     private func buildFilter() -> ((ICloudFile) -> Bool)? {
@@ -102,4 +126,20 @@ struct StatusCommand: ParsableCommand {
 
 enum SortField: String, ExpressibleByArgument, Sendable {
     case name, size, status
+}
+
+struct StatusOutput: Encodable {
+    let path: String
+    let files: [ICloudFile]
+    let summary: StatusSummary?
+    var error: String?
+}
+
+struct StatusSummary: Encodable {
+    let total: Int
+    let local: Int
+    let cloud: Int
+    let downloading: Int
+    let uploading: Int
+    let evictableBytes: Int64
 }

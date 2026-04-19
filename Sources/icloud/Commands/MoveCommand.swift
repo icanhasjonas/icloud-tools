@@ -19,6 +19,9 @@ struct MoveCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
+    @Flag(help: "Output as JSON.")
+    var json = false
+
     func validate() throws {
         guard paths.count >= 2 else {
             throw ValidationError("Usage: icloud mv <source...> <destination>")
@@ -32,7 +35,8 @@ struct MoveCommand: ParsableCommand {
             allowDirectories: true,
             force: force,
             noClobber: noClobber,
-            verbose: verbose
+            verbose: verbose,
+            json: json
         ) { fm, src, dest in
             try fm.moveItem(at: src, to: dest)
         }
