@@ -50,67 +50,42 @@ struct FileOperation {
                 : destURL
             let destDisplay = PathResolver.relativePath(finalDest)
 
-            if dryRun {
-                if srcIsDir.boolValue {
-                    let rebase = PathResolver.Rebase(srcURL)
-                    let srcResolved = srcURL.resolvingSymlinksInPath().path
-                    let result = try Scanner.scan(directory: srcURL, recursive: true)
-                    for file in result.files {
-                        let display = PathResolver.relativePath(file.url, rebase: rebase)
-                        let size = Output.humanSize(file.fileSize)
-                        let childRelative = String(file.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
-                        let toURL = finalDest.appendingPathComponent(childRelative)
-                        let toDisplay = PathResolver.relativePath(toURL)
-                        if json {
-                            try Output.printJSONLine(FileOperationResult(
-                                source: file.url.path, destination: toURL.path,
-                                status: "would-\(actionVerb)", size: file.fileSize))
-                        } else {
-                            print("\(display) \(Output.dim)(\(size))\(Output.reset)")
-                            print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
-                        }
-                    }
-                } else {
-                    let size = Output.humanSize(fileInfo.fileSize)
-                    if json {
-                        try Output.printJSONLine(FileOperationResult(
-                            source: srcURL.path, destination: finalDest.path,
-                            status: "would-\(actionVerb)", size: fileInfo.fileSize))
-                    } else {
-                        print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
-                        print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
-                    }
-                }
-                continue
-            }
-
             if srcIsDir.boolValue {
                 let rebase = PathResolver.Rebase(srcURL)
                 let srcResolved = srcURL.resolvingSymlinksInPath().path
-                try Downloader.ensureLocalRecursive(srcURL) { event in
+                try Downloader.ensureLocalRecursive(srcURL, dryRun: dryRun) { event in
+                    guard verbose && !json else { return }
+                    let f: ICloudFile
                     switch event {
-                    case .starting(let f):
-                        guard verbose && !json else { return }
-                        let display = PathResolver.relativePath(f.url, rebase: rebase)
-                        let size = Output.humanSize(f.fileSize)
+                    case .starting(let file): f = file
+                    case .done(let file): f = file
+                    case .wouldDownload(let file): f = file
+                    case .skipped(let file): f = file
+                    }
+
+                    let display = PathResolver.relativePath(f.url, rebase: rebase)
+                    let size = Output.humanSize(f.fileSize)
+                    let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
+                    let toURL = finalDest.appendingPathComponent(childRelative)
+                    let toDisplay = PathResolver.relativePath(toURL)
+
+                    switch event {
+                    case .starting:
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         print("  \(Output.yellow)downloading...\(Output.reset)")
-                    case .done(let f):
-                        guard verbose && !json else { return }
-                        let fromDisplay = PathResolver.relativePath(f.url, rebase: rebase)
-                        let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
-                        let toURL = finalDest.appendingPathComponent(childRelative)
-                        let toDisplay = PathResolver.relativePath(toURL)
+                    case .done:
                         print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
-                    case .skipped(let f):
-                        guard verbose && !json else { return }
-                        let display = PathResolver.relativePath(f.url, rebase: rebase)
-                        let size = Output.humanSize(f.fileSize)
-                        let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
-                        let toURL = finalDest.appendingPathComponent(childRelative)
-                        let toDisplay = PathResolver.relativePath(toURL)
+                    case .wouldDownload:
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
-                        print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                        print("  \(Output.dim)would download\(Output.reset)")
+                        print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
+                    case .skipped:
+                        print("\(display) \(Output.dim)(\(size))\(Output.reset)")
+                        if dryRun {
+                            print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
+                        } else {
+                            print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                        }
                     }
                 }
             } else {
@@ -120,11 +95,15 @@ struct FileOperation {
                 if verbose && !json {
                     print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
                     if needsDownload {
-                        print("  \(Output.yellow)downloading...\(Output.reset)")
+                        if dryRun {
+                            print("  \(Output.dim)would download\(Output.reset)")
+                        } else {
+                            print("  \(Output.yellow)downloading...\(Output.reset)")
+                        }
                     }
                 }
 
-                try Downloader.ensureLocal(srcURL)
+                try Downloader.ensureLocal(srcURL, dryRun: dryRun)
             }
 
             if fm.fileExists(atPath: finalDest.path) {
@@ -139,20 +118,32 @@ struct FileOperation {
                     continue
                 }
                 if force {
-                    try fm.removeItem(at: finalDest)
+                    if !dryRun {
+                        try fm.removeItem(at: finalDest)
+                    }
                 } else {
                     throw FileOperationError.destinationExists(finalDest.path)
                 }
             }
 
-            try operation(fm, srcURL, finalDest)
+            if dryRun {
+                if json {
+                    try Output.printJSONLine(FileOperationResult(
+                        source: srcURL.path, destination: finalDest.path,
+                        status: "would-\(actionVerb)", size: fileInfo.fileSize))
+                } else if !srcIsDir.boolValue {
+                    print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
+                }
+            } else {
+                try operation(fm, srcURL, finalDest)
 
-            if json {
-                try Output.printJSONLine(FileOperationResult(
-                    source: srcURL.path, destination: finalDest.path,
-                    status: verb, size: fileInfo.fileSize))
-            } else if verbose && !srcIsDir.boolValue {
-                print("  \(Output.green)\(verb)\(Output.reset) -> \(destDisplay)")
+                if json {
+                    try Output.printJSONLine(FileOperationResult(
+                        source: srcURL.path, destination: finalDest.path,
+                        status: verb, size: fileInfo.fileSize))
+                } else if verbose && !srcIsDir.boolValue {
+                    print("  \(Output.green)\(verb)\(Output.reset) -> \(destDisplay)")
+                }
             }
         }
     }
