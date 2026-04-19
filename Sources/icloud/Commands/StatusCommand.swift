@@ -4,28 +4,38 @@ import Foundation
 struct StatusCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "Show iCloud status for files."
+        abstract: "Show iCloud sync status for files and directories.",
+        discussion: """
+            Defaults to cwd if inside iCloud Drive, otherwise the iCloud Drive root.
+            Symlinked paths (e.g. ~/.icloud) are resolved automatically.
+
+            EXAMPLES:
+              icloud status
+              icloud status -r Documents/
+              icloud status --cloud --sort size
+              icloud status --json | jq '.summary'
+            """
     )
 
-    @Argument(help: "Path to check (default: cwd if iCloud, otherwise iCloud Drive root).")
+    @Argument(help: "Path to check.")
     var path: String?
 
     @Flag(name: .shortAndLong, help: "Recurse into subdirectories.")
     var recursive = false
 
-    @Flag(help: "Only show cloud-only (dataless) files.")
+    @Flag(help: "Show only cloud-only files.")
     var cloud = false
 
-    @Flag(help: "Only show local files.")
+    @Flag(help: "Show only local files.")
     var local = false
 
-    @Flag(help: "Only show actively downloading files.")
+    @Flag(help: "Show only downloading files.")
     var downloading = false
 
-    @Flag(name: .shortAndLong, help: "Show resolved paths and debug info.")
+    @Flag(name: .shortAndLong, help: "Show resolved paths.")
     var verbose = false
 
-    @Flag(help: "Output as JSON.")
+    @Flag(help: "JSON output.")
     var json = false
 
     @Option(help: "Sort by: name, size, status.")

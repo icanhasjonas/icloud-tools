@@ -4,13 +4,23 @@ import Foundation
 struct MoveCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mv",
-        abstract: "Move iCloud Drive files (downloads dataless files first)."
+        abstract: "Move files (downloads cloud-only files first).",
+        discussion: """
+            Downloads dataless files before moving, preventing mmap deadlocks.
+            Accepts multiple sources with a directory as the last argument.
+
+            EXAMPLES:
+              icloud mv file.pdf ~/Desktop/
+              icloud mv -v a.pdf b.pdf dest/
+              icloud mv -fn old.pdf new.pdf
+              icloud mv --json src.pdf dest/
+            """
     )
 
-    @Argument(help: "Source path(s) followed by destination.")
+    @Argument(parsing: .allUnrecognized, help: "source... dest")
     var paths: [String]
 
-    @Flag(name: .shortAndLong, help: "Force overwrite.")
+    @Flag(name: .shortAndLong, help: "Overwrite existing files.")
     var force = false
 
     @Flag(name: .shortAndLong, help: "Do not overwrite existing files.")
@@ -19,12 +29,12 @@ struct MoveCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
-    @Flag(help: "Output as JSON.")
+    @Flag(help: "NDJSON output.")
     var json = false
 
     func validate() throws {
         guard paths.count >= 2 else {
-            throw ValidationError("Usage: icloud mv <source...> <destination>")
+            throw ValidationError("Usage: icloud mv [-fnv] source... dest")
         }
     }
 

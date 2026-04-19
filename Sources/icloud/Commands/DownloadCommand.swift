@@ -4,10 +4,20 @@ import Foundation
 struct DownloadCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "download",
-        abstract: "Download iCloud Drive files (materialize dataless files)."
+        abstract: "Download (materialize) cloud-only files.",
+        discussion: """
+            Triggers iCloud download and waits for completion.
+            Use -r for directories, --dry-run to preview.
+
+            EXAMPLES:
+              icloud download file.pdf
+              icloud download -rv Documents/
+              icloud download --dry-run -r .
+              icloud download --json --timeout 60 big.zip
+            """
     )
 
-    @Argument(help: "File or directory path(s) to download.")
+    @Argument(parsing: .allUnrecognized, help: "path...")
     var paths: [String]
 
     @Flag(name: .shortAndLong, help: "Download directories recursively.")
@@ -16,14 +26,20 @@ struct DownloadCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
-    @Flag(help: "Output as JSON (NDJSON).")
+    @Flag(help: "NDJSON output.")
     var json = false
 
-    @Flag(help: "Show what would be downloaded without doing it.")
+    @Flag(name: .shortAndLong, help: "Preview without downloading.")
     var dryRun = false
 
-    @Option(help: "Max seconds to wait per file (default: 300).")
+    @Option(name: .shortAndLong, help: "Seconds to wait per file.")
     var timeout: Int = 300
+
+    func validate() throws {
+        guard !paths.isEmpty else {
+            throw ValidationError("Usage: icloud download [-rv] [--dry-run] path...")
+        }
+    }
 
     func run() throws {
         let fm = FileManager.default
@@ -39,7 +55,7 @@ struct DownloadCommand: ParsableCommand {
             }
 
             if isDir.boolValue && !recursive {
-                throw ValidationError("\(url.lastPathComponent) is a directory (use -r to download recursively)")
+                throw ValidationError("\(url.lastPathComponent) is a directory (use -r)")
             }
 
             if isDir.boolValue {

@@ -4,16 +4,27 @@ import Foundation
 struct CopyCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "cp",
-        abstract: "Copy iCloud Drive files (downloads dataless files first)."
+        abstract: "Copy files (downloads cloud-only files first).",
+        discussion: """
+            Downloads dataless files before copying, preventing mmap deadlocks.
+            Use -r for directories. Accepts multiple sources with a directory as
+            the last argument.
+
+            EXAMPLES:
+              icloud cp file.pdf ~/Desktop/
+              icloud cp -rv Documents/ ~/backup/
+              icloud cp -fn a.pdf b.pdf dest/
+              icloud cp --json src.pdf dest/
+            """
     )
 
-    @Argument(help: "Source path(s) followed by destination.")
+    @Argument(parsing: .allUnrecognized, help: "source... dest")
     var paths: [String]
 
     @Flag(name: .shortAndLong, help: "Copy directories recursively.")
     var recursive = false
 
-    @Flag(name: .shortAndLong, help: "Force overwrite.")
+    @Flag(name: .shortAndLong, help: "Overwrite existing files.")
     var force = false
 
     @Flag(name: .shortAndLong, help: "Do not overwrite existing files.")
@@ -22,12 +33,12 @@ struct CopyCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
-    @Flag(help: "Output as JSON.")
+    @Flag(help: "NDJSON output.")
     var json = false
 
     func validate() throws {
         guard paths.count >= 2 else {
-            throw ValidationError("Usage: icloud cp <source...> <destination>")
+            throw ValidationError("Usage: icloud cp [-rfnv] source... dest")
         }
     }
 

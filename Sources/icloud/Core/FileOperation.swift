@@ -51,9 +51,18 @@ struct FileOperation {
             }
 
             if srcIsDir.boolValue {
-                try Downloader.ensureLocalRecursive(srcURL) { name, done in
-                    if verbose && !json && done {
-                        print("  \(Output.green)ready\(Output.reset) \(name)")
+                try Downloader.ensureLocalRecursive(srcURL) { event in
+                    guard verbose && !json else { return }
+                    switch event {
+                    case .starting(let f):
+                        let display = PathResolver.relativePath(f.url)
+                        let size = Output.humanSize(f.fileSize)
+                        print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
+                    case .done(let f):
+                        let display = PathResolver.relativePath(f.url)
+                        print("  \(Output.green)done\(Output.reset) \(display)")
+                    case .skipped:
+                        break
                     }
                 }
             } else {

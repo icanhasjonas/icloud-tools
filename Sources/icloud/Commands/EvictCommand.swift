@@ -4,10 +4,20 @@ import Foundation
 struct EvictCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "evict",
-        abstract: "Evict local copies, making files cloud-only to free disk space."
+        abstract: "Evict local copies to free disk space.",
+        discussion: """
+            Makes files cloud-only by removing the local copy.
+            Pinned files are skipped (unpin first). Use --dry-run to preview.
+
+            EXAMPLES:
+              icloud evict file.pdf
+              icloud evict -rv old-projects/
+              icloud evict --dry-run -r .
+              icloud evict --json big.zip
+            """
     )
 
-    @Argument(help: "File or directory path(s) to evict.")
+    @Argument(parsing: .allUnrecognized, help: "path...")
     var paths: [String]
 
     @Flag(name: .shortAndLong, help: "Evict directories recursively.")
@@ -16,11 +26,17 @@ struct EvictCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
-    @Flag(help: "Output as JSON (NDJSON).")
+    @Flag(help: "NDJSON output.")
     var json = false
 
-    @Flag(help: "Show what would be evicted without doing it.")
+    @Flag(name: .shortAndLong, help: "Preview without evicting.")
     var dryRun = false
+
+    func validate() throws {
+        guard !paths.isEmpty else {
+            throw ValidationError("Usage: icloud evict [-rv] [--dry-run] path...")
+        }
+    }
 
     func run() throws {
         let fm = FileManager.default
@@ -36,7 +52,7 @@ struct EvictCommand: ParsableCommand {
             }
 
             if isDir.boolValue && !recursive {
-                throw ValidationError("\(url.lastPathComponent) is a directory (use -r to evict recursively)")
+                throw ValidationError("\(url.lastPathComponent) is a directory (use -r)")
             }
 
             let filesToEvict: [ICloudFile]

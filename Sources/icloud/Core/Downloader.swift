@@ -1,5 +1,11 @@
 import Foundation
 
+enum DownloadEvent {
+    case starting(ICloudFile)
+    case done(ICloudFile)
+    case skipped(ICloudFile)
+}
+
 struct Downloader {
     static func ensureLocal(_ url: URL, timeout: TimeInterval = 300) throws {
         let file = try ICloudFile.from(url: url, checkPin: false)
@@ -29,21 +35,25 @@ struct Downloader {
     static func ensureLocalRecursive(
         _ url: URL,
         timeout: TimeInterval = 300,
-        progress: ((String, Bool) -> Void)? = nil
+        progress: ((DownloadEvent) -> Void)? = nil
     ) throws {
         let file = try ICloudFile.from(url: url, checkPin: false)
 
         if !file.isDirectory {
-            progress?(url.lastPathComponent, false)
-            try ensureLocal(url, timeout: timeout)
-            progress?(url.lastPathComponent, true)
+            if file.isUbiquitous && file.status == .cloud {
+                progress?(.starting(file))
+                try ensureLocal(url, timeout: timeout)
+                progress?(.done(file))
+            } else {
+                progress?(.skipped(file))
+            }
             return
         }
 
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .isUbiquitousItemKey],
+            includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
             options: [.skipsHiddenFiles]
         ) else { return }
 
@@ -51,9 +61,13 @@ struct Downloader {
             let child = try ICloudFile.from(url: fileURL, checkPin: false)
             if child.isDirectory { continue }
 
-            progress?(fileURL.lastPathComponent, false)
-            try ensureLocal(fileURL, timeout: timeout)
-            progress?(fileURL.lastPathComponent, true)
+            if child.isUbiquitous && child.status == .cloud {
+                progress?(.starting(child))
+                try ensureLocal(fileURL, timeout: timeout)
+                progress?(.done(child))
+            } else {
+                progress?(.skipped(child))
+            }
         }
     }
 }

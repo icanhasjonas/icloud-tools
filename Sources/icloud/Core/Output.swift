@@ -1,14 +1,17 @@
 import Foundation
 
 struct Output {
-    static let reset = "\u{1B}[0m"
-    static let bold = "\u{1B}[1m"
-    static let dim = "\u{1B}[2m"
-    static let green = "\u{1B}[32m"
-    static let yellow = "\u{1B}[33m"
-    static let red = "\u{1B}[31m"
-    static let cyan = "\u{1B}[36m"
-    static let blue = "\u{1B}[34m"
+    static let noColor = ProcessInfo.processInfo.environment["NO_COLOR"] != nil
+        || isatty(STDOUT_FILENO) == 0
+
+    static let reset = noColor ? "" : "\u{1B}[0m"
+    static let bold = noColor ? "" : "\u{1B}[1m"
+    static let dim = noColor ? "" : "\u{1B}[2m"
+    static let green = noColor ? "" : "\u{1B}[32m"
+    static let yellow = noColor ? "" : "\u{1B}[33m"
+    static let red = noColor ? "" : "\u{1B}[31m"
+    static let cyan = noColor ? "" : "\u{1B}[36m"
+    static let blue = noColor ? "" : "\u{1B}[34m"
 
     static func statusColor(_ status: ICloudStatus) -> String {
         switch status {
