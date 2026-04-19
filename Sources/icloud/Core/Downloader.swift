@@ -47,7 +47,7 @@ struct Downloader {
         let file = try ICloudFile.from(url: url, checkPin: false)
 
         if !file.isDirectory {
-            processOne(file, timeout: timeout, dryRun: dryRun, progress: progress)
+            try processOne(file, timeout: timeout, dryRun: dryRun, progress: progress)
             return
         }
 
@@ -61,7 +61,7 @@ struct Downloader {
         for case let fileURL as URL in enumerator {
             let child = try ICloudFile.from(url: fileURL, checkPin: false)
             if child.isDirectory { continue }
-            processOne(child, timeout: timeout, dryRun: dryRun, progress: progress)
+            try processOne(child, timeout: timeout, dryRun: dryRun, progress: progress)
         }
     }
 
@@ -70,13 +70,13 @@ struct Downloader {
         timeout: TimeInterval,
         dryRun: Bool,
         progress: ((DownloadEvent) -> Void)?
-    ) {
+    ) throws {
         if file.isUbiquitous && file.status == .cloud {
             if dryRun {
                 progress?(.wouldDownload(file))
             } else {
                 progress?(.starting(file))
-                try? ensureLocal(file, timeout: timeout)
+                try ensureLocal(file, timeout: timeout)
                 progress?(.done(file))
             }
         } else {
