@@ -58,77 +58,47 @@ struct DownloadCommand: ParsableCommand {
                 throw ValidationError("\(url.lastPathComponent) is a directory (use -r)")
             }
 
-            if isDir.boolValue {
-                let rebase = PathResolver.Rebase(url)
-                let result = try Scanner.scan(directory: url, recursive: true) { $0.status == .cloud }
+            let rebase = PathResolver.Rebase(url)
 
-                for file in result.files {
-                    let display = PathResolver.relativePath(file.url, rebase: rebase)
-                    let size = Output.humanSize(file.fileSize)
-
-                    if dryRun {
-                        if json {
-                            try Output.printJSONLine(DownloadResult(
-                                path: file.url.path, name: file.name,
-                                size: file.fileSize, status: "would-download"))
-                        } else {
-                            print("  \(Output.dim)would download\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                        }
-                    } else {
-                        if verbose && !json {
-                            print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                        }
-                        try Downloader.ensureLocal(file.url, timeout: TimeInterval(timeout))
-                        if json {
-                            try Output.printJSONLine(DownloadResult(
-                                path: file.url.path, name: file.name,
-                                size: file.fileSize, status: "downloaded"))
-                        } else if verbose {
-                            print("  \(Output.green)done\(Output.reset) \(display)")
-                        }
-                    }
-                    totalFiles += 1
-                    totalBytes += file.fileSize
-                }
-            } else {
-                let file = try ICloudFile.from(url: url, checkPin: false)
-                let display = PathResolver.relativePath(url)
+            try Downloader.ensureLocalRecursive(url, timeout: TimeInterval(timeout), dryRun: dryRun) { event in
+                let file = event.file
+                let display = PathResolver.relativePath(file.url, rebase: rebase)
                 let size = Output.humanSize(file.fileSize)
 
-                if file.status != .cloud {
-                    if json {
-                        try Output.printJSONLine(DownloadResult(
-                            path: url.path, name: file.name,
-                            size: file.fileSize, status: "already-local"))
-                    } else if verbose {
-                        print("  \(Output.green)local\(Output.reset) \(display)")
-                    }
-                    continue
-                }
-
-                if dryRun {
-                    if json {
-                        try Output.printJSONLine(DownloadResult(
-                            path: url.path, name: file.name,
-                            size: file.fileSize, status: "would-download"))
-                    } else {
-                        print("  \(Output.dim)would download\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                    }
-                } else {
+                switch event {
+                case .starting:
                     if verbose && !json {
                         print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
                     }
-                    try Downloader.ensureLocal(url, timeout: TimeInterval(timeout))
+                case .done:
+                    totalFiles += 1
+                    totalBytes += file.fileSize
                     if json {
                         try Output.printJSONLine(DownloadResult(
-                            path: url.path, name: file.name,
+                            path: file.url.path, name: file.name,
                             size: file.fileSize, status: "downloaded"))
                     } else if verbose {
                         print("  \(Output.green)done\(Output.reset) \(display)")
                     }
+                case .wouldDownload:
+                    totalFiles += 1
+                    totalBytes += file.fileSize
+                    if json {
+                        try Output.printJSONLine(DownloadResult(
+                            path: file.url.path, name: file.name,
+                            size: file.fileSize, status: "would-download"))
+                    } else {
+                        print("  \(Output.dim)would download\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
+                    }
+                case .skipped:
+                    if json {
+                        try Output.printJSONLine(DownloadResult(
+                            path: file.url.path, name: file.name,
+                            size: file.fileSize, status: "already-local"))
+                    } else if verbose {
+                        print("  \(Output.green)local\(Output.reset) \(display)")
+                    }
                 }
-                totalFiles += 1
-                totalBytes += file.fileSize
             }
         }
 

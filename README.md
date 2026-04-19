@@ -61,10 +61,13 @@ Move files with download-first semantics. Dataless files are downloaded before m
 icloud mv file.pdf ~/Desktop/       # move single file
 icloud mv a.pdf b.pdf dest/         # move multiple into directory
 icloud mv -v old.pdf new.pdf        # verbose with sizes
-icloud mv -f src.pdf existing.pdf   # force overwrite
+icloud mv -f src.pdf existing.pdf   # force overwrite (atomic backup+restore)
 icloud mv -n src.pdf existing.pdf   # skip if exists
+icloud mv -d src.pdf dest/          # dry-run preview
 icloud mv --json src.pdf dest/      # NDJSON output
 ```
+
+`-f` moves the existing destination to a hidden backup, runs the operation, then removes the backup on success. If the operation fails the backup is restored. If restore itself fails the path to the surviving backup is reported in the error.
 
 ### Copy
 
@@ -74,37 +77,51 @@ Copy files with download-first semantics. Same flags as `mv`, plus `-r` for dire
 icloud cp file.pdf ~/Desktop/       # copy single file
 icloud cp -r Documents/ ~/backup/   # recursive directory copy
 icloud cp -v -f *.pdf dest/         # verbose, force overwrite
+icloud cp -d src.pdf dest/          # dry-run preview
 icloud cp --json src.pdf dest/      # NDJSON output
 ```
 
-### Download (coming soon)
+### Download
+
+Triggers iCloud download and waits for completion. Files that are mid-download or dataless-but-marked-local are waited on correctly, not skipped.
 
 ```bash
-icloud download file.pdf         # download and wait
-icloud download -r Documents/    # download entire directory
-icloud download --no-wait *.pdf  # trigger and exit
+icloud download file.pdf               # download and wait
+icloud download -rv Documents/         # recursive + verbose
+icloud download --dry-run -r .         # preview, no download
+icloud download --timeout 60 big.zip   # override per-file timeout (default 300s)
+icloud download --json *.pdf           # NDJSON output
 ```
 
-### Evict (coming soon)
+### Evict
+
+Makes files cloud-only by removing the local copy. Pinned files are skipped; unpin first.
 
 ```bash
 icloud evict file.pdf            # free local copy
-icloud evict -r old-projects/    # evict entire directory
-icloud evict --min-size 100MB    # only large files
+icloud evict -rv old-projects/   # recursive + verbose
+icloud evict --dry-run -r .      # preview without evicting
+icloud evict --json big.zip      # NDJSON output
 ```
 
-### Pin / Unpin (coming soon)
+### Pin / Unpin
+
+`pin` sets the `com.apple.fileprovider.pinned#PX` xattr (same mechanism as Finder's "Keep Downloaded"). Pinned files are protected from automatic eviction on disk pressure and from `icloud evict`.
 
 ```bash
-icloud pin important.pdf         # keep downloaded, prevent auto-eviction
-icloud unpin important.pdf       # allow system to evict on disk pressure
+icloud pin important.pdf                     # single file
+icloud pin -r Documents/                     # recursive
+icloud pin --from-tag Green                  # all files with Finder tag "Green"
+icloud pin --from-tag Green+Important -r .   # AND: both tags required
+icloud pin --from-tag Red --from-tag Blue    # OR: either tag matches
+icloud pin --dry-run --from-tag Green        # preview
+
+icloud unpin important.pdf                   # allow system to evict
+icloud unpin -r Documents/
+icloud unpin --from-tag Green
 ```
 
-### Watch (coming soon)
-
-```bash
-icloud watch                     # live sync activity monitor
-```
+Tag filters: repeat `--from-tag` for OR, use `+` inside one expression for AND.
 
 ## JSON Output
 

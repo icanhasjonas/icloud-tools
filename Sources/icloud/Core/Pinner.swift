@@ -97,11 +97,8 @@ struct Pinner {
                         wouldVerb: wouldVerb, rebase: rebase)
                 }
             } else {
-                if let tagFilter {
-                    let file = try ICloudFile.from(url: url)
-                    guard tagFilter.matches(file.tagNames) else { continue }
-                }
                 let file = try ICloudFile.from(url: url)
+                if let tagFilter, !tagFilter.matches(file.tagNames) { continue }
                 totalCount += try processFile(
                     file, pinning: pinning, dryRun: dryRun,
                     verbose: verbose, json: json, verb: verb,

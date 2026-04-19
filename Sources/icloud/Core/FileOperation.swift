@@ -122,20 +122,25 @@ struct FileOperation {
                     continue
                 }
                 if force {
-                    if dryRun {
-                        // don't delete in dry-run
-                    } else {
-                        // move existing dest to temp, operate, then clean up
-                        // if operation fails, restore dest from temp
+                    if !dryRun {
+                        let suffix = ".icloud-backup-\(ProcessInfo.processInfo.processIdentifier)-\(Int(Date().timeIntervalSince1970))"
                         let tempDest = finalDest.deletingLastPathComponent()
-                            .appendingPathComponent(".\(finalDest.lastPathComponent).icloud-backup")
+                            .appendingPathComponent(".\(finalDest.lastPathComponent)\(suffix)")
                         try fm.moveItem(at: finalDest, to: tempDest)
                         do {
                             try operation(fm, srcURL, finalDest)
                             try fm.removeItem(at: tempDest)
-                        } catch {
-                            try? fm.moveItem(at: tempDest, to: finalDest)
-                            throw error
+                        } catch let opError {
+                            do {
+                                try fm.moveItem(at: tempDest, to: finalDest)
+                            } catch let restoreError {
+                                throw FileOperationError.restoreFailed(
+                                    backupPath: tempDest.path,
+                                    operationError: opError.localizedDescription,
+                                    restoreError: restoreError.localizedDescription
+                                )
+                            }
+                            throw opError
                         }
 
                         if json {
@@ -181,6 +186,7 @@ enum FileOperationError: LocalizedError {
     case destinationExists(String)
     case directoryRequiresRecursive(String)
     case conflictingFlags
+    case restoreFailed(backupPath: String, operationError: String, restoreError: String)
 
     var errorDescription: String? {
         switch self {
@@ -194,6 +200,8 @@ enum FileOperationError: LocalizedError {
             return "\(name) is a directory (use -r to copy recursively)"
         case .conflictingFlags:
             return "Cannot use --force and --no-clobber together."
+        case .restoreFailed(let backupPath, let opError, let restoreError):
+            return "Operation failed (\(opError)) AND backup restore failed (\(restoreError)). Backup left at: \(backupPath)"
         }
     }
 }

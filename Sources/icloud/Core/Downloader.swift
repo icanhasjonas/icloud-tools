@@ -18,7 +18,7 @@ struct Downloader {
         guard file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) else { return }
         if dryRun { return }
 
-        if file.status == .cloud {
+        if file.status != .downloading {
             try FileManager.default.startDownloadingUbiquitousItem(at: file.url)
         }
 
@@ -27,13 +27,16 @@ struct Downloader {
             let fresh = URL(fileURLWithPath: file.url.path)
             let values = try fresh.resourceValues(forKeys: [
                 .ubiquitousItemDownloadingStatusKey,
-                .ubiquitousItemIsDownloadingKey,
+                .fileSizeKey,
                 .fileAllocatedSizeKey,
             ])
 
             let status = values.ubiquitousItemDownloadingStatus
+            let fileSize = values.fileSize ?? 0
             let allocated = values.fileAllocatedSize ?? 0
-            if (status == .current || status == .downloaded) && allocated > 0 {
+            let stillDataless = fileSize > 0 && allocated == 0
+
+            if (status == .current || status == .downloaded) && !stillDataless {
                 return
             }
 
@@ -52,7 +55,7 @@ struct Downloader {
         _ url: URL,
         timeout: TimeInterval = 300,
         dryRun: Bool = false,
-        progress: ((DownloadEvent) -> Void)? = nil
+        progress: ((DownloadEvent) throws -> Void)? = nil
     ) throws {
         let file = try ICloudFile.from(url: url, checkPin: false)
 
@@ -88,18 +91,18 @@ struct Downloader {
         _ file: ICloudFile,
         timeout: TimeInterval,
         dryRun: Bool,
-        progress: ((DownloadEvent) -> Void)?
+        progress: ((DownloadEvent) throws -> Void)?
     ) throws {
         if file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) {
             if dryRun {
-                progress?(.wouldDownload(file))
+                try progress?(.wouldDownload(file))
             } else {
-                progress?(.starting(file))
+                try progress?(.starting(file))
                 try ensureLocal(file, timeout: timeout)
-                progress?(.done(file))
+                try progress?(.done(file))
             }
         } else {
-            progress?(.skipped(file))
+            try progress?(.skipped(file))
         }
     }
 }
