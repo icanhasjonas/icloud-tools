@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/
+.DS_Store
+.claude/
+.rclaude/
+PLAN.md

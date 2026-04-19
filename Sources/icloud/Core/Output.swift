@@ -1,0 +1,88 @@
+import Foundation
+
+struct Output {
+    static let reset = "\u{1B}[0m"
+    static let bold = "\u{1B}[1m"
+    static let dim = "\u{1B}[2m"
+    static let green = "\u{1B}[32m"
+    static let yellow = "\u{1B}[33m"
+    static let red = "\u{1B}[31m"
+    static let cyan = "\u{1B}[36m"
+    static let blue = "\u{1B}[34m"
+
+    static func statusColor(_ status: ICloudStatus) -> String {
+        switch status {
+        case .local: return green
+        case .cloud: return dim
+        case .downloading: return yellow
+        case .uploading: return cyan
+        case .excluded: return blue
+        case .unknown: return red
+        }
+    }
+
+    static func statusLabel(_ status: ICloudStatus) -> String {
+        switch status {
+        case .local: return "local"
+        case .cloud: return "cloud"
+        case .downloading: return "sync"
+        case .uploading: return "sync"
+        case .excluded: return "excl"
+        case .unknown: return "????"
+        }
+    }
+
+    static func humanSize(_ bytes: Int64) -> String {
+        if bytes == 0 { return "" }
+        let units: [(String, Int64)] = [
+            ("GB", 1_000_000_000),
+            ("MB", 1_000_000),
+            ("KB", 1_000),
+        ]
+        for (unit, threshold) in units {
+            if bytes >= threshold {
+                let value = Double(bytes) / Double(threshold)
+                return value >= 10
+                    ? "\(Int(value)) \(unit)"
+                    : String(format: "%.1f \(unit)", value)
+            }
+        }
+        return "\(bytes) B"
+    }
+
+    static func printFileTable(_ files: [ICloudFile]) {
+        let nameWidth = files.map(\.name.count).max() ?? 20
+        let pinMarker = "P"
+
+        for file in files {
+            let color = statusColor(file.status)
+            let label = statusLabel(file.status)
+            let name = file.isDirectory ? file.name + "/" : file.name
+            let size = file.isDirectory ? "" : humanSize(file.fileSize)
+            let pin = file.isPinned ? " \(cyan)\(pinMarker)\(reset)" : ""
+
+            let padding = String(repeating: " ", count: max(0, nameWidth - name.count + 2))
+            print("  \(color)\(label)\(reset)   \(name)\(padding)\(dim)\(size)\(reset)\(pin)")
+        }
+    }
+
+    static func printSummary(_ result: ScanResult) {
+        var parts: [String] = []
+        if result.localCount > 0 {
+            parts.append("\(green)\(result.localCount) local\(reset)")
+        }
+        if result.cloudCount > 0 {
+            parts.append("\(dim)\(result.cloudCount) cloud\(reset)")
+        }
+        if result.downloadingCount > 0 || result.uploadingCount > 0 {
+            let syncCount = result.downloadingCount + result.uploadingCount
+            parts.append("\(yellow)\(syncCount) syncing\(reset)")
+        }
+
+        var summary = "\n" + parts.joined(separator: "  ")
+        if result.totalEvictableSize > 0 {
+            summary += "  \(dim)(\(humanSize(result.totalEvictableSize)) evictable)\(reset)"
+        }
+        print(summary)
+    }
+}
