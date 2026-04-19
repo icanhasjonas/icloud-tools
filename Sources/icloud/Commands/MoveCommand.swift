@@ -44,7 +44,7 @@ struct MoveCommand: ParsableCommand {
     func run() throws {
         try FileOperation.execute(
             paths: paths,
-            verb: "moved",
+            verb: .move,
             allowDirectories: true,
             force: force,
             noClobber: noClobber,

@@ -93,17 +93,25 @@ struct Output {
         print(summary)
     }
 
+    private static let jsonEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
+
+    private static let jsonLineEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        e.outputFormatting = [.sortedKeys]
+        return e
+    }()
+
     static func printJSON(_ value: some Encodable) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(value)
+        let data = try jsonEncoder.encode(value)
         print(String(data: data, encoding: .utf8)!)
     }
 
     static func printJSONLine(_ value: some Encodable) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
+        let data = try jsonLineEncoder.encode(value)
         print(String(data: data, encoding: .utf8)!)
     }
 }

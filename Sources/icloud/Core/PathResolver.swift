@@ -9,9 +9,17 @@ struct PathResolver {
     static let mobileDocuments: String =
         iCloudDriveRoot.deletingLastPathComponent().path
 
+    private static let cwdRaw: String =
+        FileManager.default.currentDirectoryPath
+
+    private static let cwdResolved: String =
+        URL(fileURLWithPath: cwdRaw).resolvingSymlinksInPath().path
+
+    private static let homePath: String =
+        FileManager.default.homeDirectoryForCurrentUser.path
+
     static func resolveDefault() -> URL {
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .standardized
+        let cwd = URL(fileURLWithPath: cwdRaw).standardized
         if isUnderMobileDocuments(cwd) {
             return cwd
         }
@@ -49,17 +57,17 @@ struct PathResolver {
         if let rebase, rawPath.hasPrefix(rebase.resolved) {
             rawPath = rebase.original + String(rawPath.dropFirst(rebase.resolved.count))
         }
-        let cwdRaw = FileManager.default.currentDirectoryPath + "/"
-        if rawPath.hasPrefix(cwdRaw) {
-            return String(rawPath.dropFirst(cwdRaw.count))
+        let cwdPrefix = cwdRaw + "/"
+        if rawPath.hasPrefix(cwdPrefix) {
+            return String(rawPath.dropFirst(cwdPrefix.count))
         }
-        let cwdResolved = URL(fileURLWithPath: cwdRaw).resolvingSymlinksInPath().path + "/"
-        if rawPath.hasPrefix(cwdResolved) {
-            return String(rawPath.dropFirst(cwdResolved.count))
+        let cwdResolvedPrefix = cwdResolved + "/"
+        if rawPath.hasPrefix(cwdResolvedPrefix) {
+            return String(rawPath.dropFirst(cwdResolvedPrefix.count))
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path + "/"
-        if rawPath.hasPrefix(home) {
-            return "~/" + String(rawPath.dropFirst(home.count))
+        let homePrefix = homePath + "/"
+        if rawPath.hasPrefix(homePrefix) {
+            return "~/" + String(rawPath.dropFirst(homePrefix.count))
         }
         return rawPath
     }

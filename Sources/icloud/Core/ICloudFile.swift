@@ -23,6 +23,7 @@ struct ICloudFile: Sendable, Encodable {
         .ubiquitousItemIsExcludedFromSyncKey,
         .fileSizeKey,
         .fileAllocatedSizeKey,
+        .tagNamesKey,
     ]
 
     let url: URL
@@ -33,6 +34,7 @@ struct ICloudFile: Sendable, Encodable {
     let allocatedSize: Int64
     let isUbiquitous: Bool
     let isPinned: Bool
+    let tagNames: [String]
 
     var isDataless: Bool {
         fileSize > 0 && allocatedSize == 0
@@ -40,7 +42,7 @@ struct ICloudFile: Sendable, Encodable {
 
     enum CodingKeys: String, CodingKey {
         case name, path, isDirectory, status
-        case fileSize, allocatedSize, isUbiquitous, isPinned, isDataless
+        case fileSize, allocatedSize, isUbiquitous, isPinned, isDataless, tagNames
     }
 
     func encode(to encoder: Encoder) throws {
@@ -54,6 +56,9 @@ struct ICloudFile: Sendable, Encodable {
         try container.encode(isUbiquitous, forKey: .isUbiquitous)
         try container.encode(isPinned, forKey: .isPinned)
         try container.encode(isDataless, forKey: .isDataless)
+        if !tagNames.isEmpty {
+            try container.encode(tagNames, forKey: .tagNames)
+        }
     }
 
     static func from(url: URL, checkPin: Bool = true) throws -> ICloudFile {
@@ -80,11 +85,6 @@ struct ICloudFile: Sendable, Encodable {
             }
         }
 
-        var pinned = false
-        if checkPin {
-            pinned = getxattr(url.path, "com.apple.fileprovider.pinned#PX", nil, 0, 0, 0) >= 0
-        }
-
         return ICloudFile(
             url: url,
             name: url.lastPathComponent,
@@ -93,7 +93,8 @@ struct ICloudFile: Sendable, Encodable {
             fileSize: Int64(values.fileSize ?? 0),
             allocatedSize: Int64(values.fileAllocatedSize ?? 0),
             isUbiquitous: isUbiquitous,
-            isPinned: pinned
+            isPinned: checkPin ? Pinner.isPinned(url) : false,
+            tagNames: values.tagNames ?? []
         )
     }
 }

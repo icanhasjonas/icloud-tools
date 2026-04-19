@@ -1,5 +1,26 @@
 import Foundation
 
+enum FileVerb {
+    case move
+    case copy
+
+    var past: String {
+        switch self {
+        case .move: return "moved"
+        case .copy: return "copied"
+        }
+    }
+
+    var present: String { rawValue }
+
+    private var rawValue: String {
+        switch self {
+        case .move: return "move"
+        case .copy: return "copy"
+        }
+    }
+}
+
 struct FileOperationResult: Encodable {
     let source: String
     let destination: String
@@ -10,7 +31,7 @@ struct FileOperationResult: Encodable {
 struct FileOperation {
     static func execute(
         paths: [String],
-        verb: String,
+        verb: FileVerb,
         allowDirectories: Bool,
         force: Bool,
         noClobber: Bool,
@@ -28,8 +49,6 @@ struct FileOperation {
         if sources.count > 1 && (!destExists || !destIsDir.boolValue) {
             throw FileOperationError.destinationNotDirectory
         }
-
-        let actionVerb = verb == "moved" ? "move" : "copy"
 
         for source in sources {
             let srcURL = PathResolver.resolve(source)
@@ -74,17 +93,17 @@ struct FileOperation {
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         print("  \(Output.yellow)downloading...\(Output.reset)")
                     case .done:
-                        print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                        print("  \(Output.green)\(verb.past)\(Output.reset) -> \(toDisplay)")
                     case .wouldDownload:
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         print("  \(Output.dim)would download\(Output.reset)")
-                        print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
+                        print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(toDisplay)")
                     case .skipped:
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         if dryRun {
-                            print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
+                            print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(toDisplay)")
                         } else {
-                            print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                            print("  \(Output.green)\(verb.past)\(Output.reset) -> \(toDisplay)")
                         }
                     }
                 }
@@ -103,7 +122,7 @@ struct FileOperation {
                     }
                 }
 
-                try Downloader.ensureLocal(srcURL, dryRun: dryRun)
+                try Downloader.ensureLocal(fileInfo, dryRun: dryRun)
             }
 
             if fm.fileExists(atPath: finalDest.path) {
@@ -130,9 +149,9 @@ struct FileOperation {
                 if json {
                     try Output.printJSONLine(FileOperationResult(
                         source: srcURL.path, destination: finalDest.path,
-                        status: "would-\(actionVerb)", size: fileInfo.fileSize))
+                        status: "would-\(verb.present)", size: fileInfo.fileSize))
                 } else if !srcIsDir.boolValue {
-                    print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
+                    print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(destDisplay)")
                 }
             } else {
                 try operation(fm, srcURL, finalDest)
@@ -140,9 +159,9 @@ struct FileOperation {
                 if json {
                     try Output.printJSONLine(FileOperationResult(
                         source: srcURL.path, destination: finalDest.path,
-                        status: verb, size: fileInfo.fileSize))
+                        status: verb.past, size: fileInfo.fileSize))
                 } else if verbose && !srcIsDir.boolValue {
-                    print("  \(Output.green)\(verb)\(Output.reset) -> \(destDisplay)")
+                    print("  \(Output.green)\(verb.past)\(Output.reset) -> \(destDisplay)")
                 }
             }
         }

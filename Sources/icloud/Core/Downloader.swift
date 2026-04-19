@@ -8,16 +8,15 @@ enum DownloadEvent {
 }
 
 struct Downloader {
-    static func ensureLocal(_ url: URL, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
-        let file = try ICloudFile.from(url: url, checkPin: false)
+    static func ensureLocal(_ file: ICloudFile, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
         guard file.isUbiquitous && file.status == .cloud else { return }
         if dryRun { return }
 
-        try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        try FileManager.default.startDownloadingUbiquitousItem(at: file.url)
 
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            let fresh = URL(fileURLWithPath: url.path)
+            let fresh = URL(fileURLWithPath: file.url.path)
             let values = try fresh.resourceValues(forKeys: [
                 .ubiquitousItemDownloadingStatusKey,
                 .ubiquitousItemIsDownloadingKey,
@@ -31,7 +30,12 @@ struct Downloader {
             Thread.sleep(forTimeInterval: 0.5)
         }
 
-        throw DownloadError.timeout(url.lastPathComponent)
+        throw DownloadError.timeout(file.url.lastPathComponent)
+    }
+
+    static func ensureLocal(_ url: URL, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
+        let file = try ICloudFile.from(url: url, checkPin: false)
+        try ensureLocal(file, timeout: timeout, dryRun: dryRun)
     }
 
     static func ensureLocalRecursive(
@@ -43,17 +47,7 @@ struct Downloader {
         let file = try ICloudFile.from(url: url, checkPin: false)
 
         if !file.isDirectory {
-            if file.isUbiquitous && file.status == .cloud {
-                if dryRun {
-                    progress?(.wouldDownload(file))
-                } else {
-                    progress?(.starting(file))
-                    try ensureLocal(url, timeout: timeout)
-                    progress?(.done(file))
-                }
-            } else {
-                progress?(.skipped(file))
-            }
+            processOne(file, timeout: timeout, dryRun: dryRun, progress: progress)
             return
         }
 
@@ -67,30 +61,36 @@ struct Downloader {
         for case let fileURL as URL in enumerator {
             let child = try ICloudFile.from(url: fileURL, checkPin: false)
             if child.isDirectory { continue }
+            processOne(child, timeout: timeout, dryRun: dryRun, progress: progress)
+        }
+    }
 
-            if child.isUbiquitous && child.status == .cloud {
-                if dryRun {
-                    progress?(.wouldDownload(child))
-                } else {
-                    progress?(.starting(child))
-                    try ensureLocal(fileURL, timeout: timeout)
-                    progress?(.done(child))
-                }
+    private static func processOne(
+        _ file: ICloudFile,
+        timeout: TimeInterval,
+        dryRun: Bool,
+        progress: ((DownloadEvent) -> Void)?
+    ) {
+        if file.isUbiquitous && file.status == .cloud {
+            if dryRun {
+                progress?(.wouldDownload(file))
             } else {
-                progress?(.skipped(child))
+                progress?(.starting(file))
+                try? ensureLocal(file, timeout: timeout)
+                progress?(.done(file))
             }
+        } else {
+            progress?(.skipped(file))
         }
     }
 }
 
 enum DownloadError: LocalizedError {
     case timeout(String)
-    case notFound(String)
 
     var errorDescription: String? {
         switch self {
         case .timeout(let name): return "Download timed out: \(name)"
-        case .notFound(let path): return "File not found: \(path)"
         }
     }
 }

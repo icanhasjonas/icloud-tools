@@ -79,9 +79,12 @@ struct Pinner {
 
             let rebase = PathResolver.Rebase(url)
 
-            if isDir.boolValue || (recursive && isDir.boolValue) {
-                let files = try collectFiles(url: url, recursive: recursive, tagFilter: tagFilter)
-                for file in files {
+            if isDir.boolValue {
+                let filter: ((ICloudFile) -> Bool)? = tagFilter.map { tf in
+                    { file in tf.matches(file.tagNames) }
+                }
+                let result = try Scanner.scan(directory: url, recursive: recursive, filter: filter)
+                for file in result.files {
                     totalCount += try processFile(
                         file.url, pinning: pinning, dryRun: dryRun,
                         verbose: verbose, json: json, verb: verb,
@@ -89,8 +92,8 @@ struct Pinner {
                 }
             } else {
                 if let tagFilter {
-                    let tags = try url.resourceValues(forKeys: [.tagNamesKey]).tagNames ?? []
-                    guard tagFilter.matches(tags) else { continue }
+                    let file = try ICloudFile.from(url: url)
+                    guard tagFilter.matches(file.tagNames) else { continue }
                 }
                 totalCount += try processFile(
                     url, pinning: pinning, dryRun: dryRun,
@@ -147,53 +150,6 @@ struct Pinner {
             }
         }
         return 1
-    }
-
-    private static func collectFiles(
-        url: URL,
-        recursive: Bool,
-        tagFilter: TagFilter?
-    ) throws -> [ICloudFile] {
-        var keys = ICloudFile.resourceKeys
-        keys.insert(.tagNamesKey)
-
-        let fm = FileManager.default
-        var files: [ICloudFile] = []
-
-        if recursive {
-            guard let enumerator = fm.enumerator(
-                at: url,
-                includingPropertiesForKeys: Array(keys),
-                options: [.skipsHiddenFiles]
-            ) else { return [] }
-
-            for case let fileURL as URL in enumerator {
-                let file = try ICloudFile.from(url: fileURL, checkPin: true)
-                if file.isDirectory { continue }
-
-                if let tagFilter {
-                    let tags = try fileURL.resourceValues(forKeys: [.tagNamesKey]).tagNames ?? []
-                    guard tagFilter.matches(tags) else { continue }
-                }
-                files.append(file)
-            }
-        } else {
-            let contents = try fm.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: Array(keys),
-                options: [.skipsHiddenFiles]
-            )
-            for fileURL in contents {
-                let file = try ICloudFile.from(url: fileURL, checkPin: true)
-                if let tagFilter {
-                    let tags = try fileURL.resourceValues(forKeys: [.tagNamesKey]).tagNames ?? []
-                    guard tagFilter.matches(tags) else { continue }
-                }
-                files.append(file)
-            }
-        }
-
-        return files
     }
 }
 

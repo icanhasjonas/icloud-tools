@@ -48,7 +48,7 @@ struct CopyCommand: ParsableCommand {
     func run() throws {
         try FileOperation.execute(
             paths: paths,
-            verb: "copied",
+            verb: .copy,
             allowDirectories: recursive,
             force: force,
             noClobber: noClobber,
