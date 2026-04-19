@@ -1,112 +1,5 @@
 import Foundation
 
-enum DownloadEvent {
-    case starting(ICloudFile)
-    case done(ICloudFile)
-    case wouldDownload(ICloudFile)
-    case skipped(ICloudFile)
-
-    var file: ICloudFile {
-        switch self {
-        case .starting(let f), .done(let f), .wouldDownload(let f), .skipped(let f): return f
-        }
-    }
-}
-
-struct Downloader {
-    static func ensureLocal(_ file: ICloudFile, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
-        guard file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) else { return }
-        if dryRun { return }
-
-        if file.status != .downloading {
-            try FileManager.default.startDownloadingUbiquitousItem(at: file.url)
-        }
-
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let fresh = URL(fileURLWithPath: file.url.path)
-            let values = try fresh.resourceValues(forKeys: [
-                .ubiquitousItemDownloadingStatusKey,
-                .fileSizeKey,
-                .fileAllocatedSizeKey,
-            ])
-
-            let status = values.ubiquitousItemDownloadingStatus
-            let fileSize = values.fileSize ?? 0
-            let allocated = values.fileAllocatedSize ?? 0
-            let stillDataless = fileSize > 0 && allocated == 0
-
-            if (status == .current || status == .downloaded) && !stillDataless {
-                return
-            }
-
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-
-        throw DownloadError.timeout(file.url.lastPathComponent)
-    }
-
-    static func ensureLocal(_ url: URL, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
-        let file = try ICloudFile.from(url: url, checkPin: false)
-        try ensureLocal(file, timeout: timeout, dryRun: dryRun)
-    }
-
-    static func ensureLocalRecursive(
-        _ url: URL,
-        timeout: TimeInterval = 300,
-        dryRun: Bool = false,
-        progress: ((DownloadEvent) throws -> Void)? = nil
-    ) throws {
-        let file = try ICloudFile.from(url: url, checkPin: false)
-
-        if !file.isDirectory {
-            try processOne(file, timeout: timeout, dryRun: dryRun, progress: progress)
-            return
-        }
-
-        let fm = FileManager.default
-        var enumeratorError: Error?
-        guard let enumerator = fm.enumerator(
-            at: url,
-            includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
-            options: [.skipsHiddenFiles],
-            errorHandler: { _, error in
-                enumeratorError = error
-                return false
-            }
-        ) else {
-            throw DownloadError.enumerationFailed(url.path)
-        }
-
-        for case let fileURL as URL in enumerator {
-            if let err = enumeratorError { throw err }
-            let child = try ICloudFile.from(url: fileURL, checkPin: false)
-            if child.isDirectory { continue }
-            try processOne(child, timeout: timeout, dryRun: dryRun, progress: progress)
-        }
-        if let err = enumeratorError { throw err }
-    }
-
-    private static func processOne(
-        _ file: ICloudFile,
-        timeout: TimeInterval,
-        dryRun: Bool,
-        progress: ((DownloadEvent) throws -> Void)?
-    ) throws {
-        if file.isUbiquitous && (file.status == .cloud || file.status == .downloading || file.isDataless) {
-            if dryRun {
-                try progress?(.wouldDownload(file))
-            } else {
-                try progress?(.starting(file))
-                try ensureLocal(file, timeout: timeout)
-                try progress?(.done(file))
-            }
-        } else {
-            try progress?(.skipped(file))
-        }
-    }
-}
-
 enum DownloadError: LocalizedError {
     case timeout(String)
     case enumerationFailed(String)
@@ -116,5 +9,124 @@ enum DownloadError: LocalizedError {
         case .timeout(let name): return "Download timed out: \(name)"
         case .enumerationFailed(let path): return "Cannot enumerate directory: \(path)"
         }
+    }
+}
+
+struct Downloader {
+    static func needsDownload(_ file: ICloudFile) -> Bool {
+        guard file.isUbiquitous else { return false }
+        switch file.status {
+        case .cloud, .downloading: return true
+        case .local, .unknown: return file.isDataless
+        case .uploading, .excluded: return false
+        }
+    }
+
+    static func enumerate(_ url: URL) throws -> [ICloudFile] {
+        let root = try ICloudFile.from(url: url, checkPin: false)
+        if !root.isDirectory {
+            return [root]
+        }
+        let fm = FileManager.default
+        var enumError: Error?
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
+            options: [.skipsHiddenFiles],
+            errorHandler: { _, error in
+                enumError = error
+                return false
+            }
+        ) else {
+            throw DownloadError.enumerationFailed(url.path)
+        }
+        var result: [ICloudFile] = []
+        for case let fileURL as URL in enumerator {
+            if let err = enumError { throw err }
+            let child = try ICloudFile.from(url: fileURL, checkPin: false)
+            if child.isDirectory { continue }
+            result.append(child)
+        }
+        if let err = enumError { throw err }
+        return result
+    }
+
+    static let maxConcurrent = 10
+
+    static func ensureLocalBatch(
+        _ files: [ICloudFile],
+        timeout: TimeInterval,
+        dryRun: Bool,
+        emit: (OpEvent) throws -> Void
+    ) throws {
+        var queue = files.filter { needsDownload($0) }
+        if queue.isEmpty || dryRun { return }
+
+        var inFlight: [String: (file: ICloudFile, started: Date, deadline: Date)] = [:]
+        var failed: [(ICloudFile, Error)] = []
+
+        func dispatchMore() throws {
+            while inFlight.count < maxConcurrent, !queue.isEmpty {
+                let f = queue.removeFirst()
+                if f.status != .downloading {
+                    try FileManager.default.startDownloadingUbiquitousItem(at: f.url)
+                }
+                try emit(.downloadStart(url: f.url, size: f.fileSize))
+                let now = Date()
+                inFlight[f.url.path] = (f, now, now.addingTimeInterval(timeout))
+            }
+        }
+
+        try dispatchMore()
+
+        while !inFlight.isEmpty || !queue.isEmpty {
+            for key in Array(inFlight.keys) {
+                guard let entry = inFlight[key] else { continue }
+                let fresh = URL(fileURLWithPath: key)
+                let values = try fresh.resourceValues(forKeys: [
+                    .ubiquitousItemDownloadingStatusKey,
+                    .fileSizeKey,
+                    .fileAllocatedSizeKey,
+                ])
+
+                let status = values.ubiquitousItemDownloadingStatus
+                let fileSize = Int64(values.fileSize ?? 0)
+                let allocated = Int64(values.fileAllocatedSize ?? 0)
+                let stillDataless = fileSize > 0 && allocated == 0
+
+                if (status == .current || status == .downloaded) && !stillDataless {
+                    let elapsed = Date().timeIntervalSince(entry.started)
+                    try emit(.downloadDone(url: entry.file.url, size: fileSize, elapsed: elapsed))
+                    inFlight.removeValue(forKey: key)
+                } else if Date() > entry.deadline {
+                    let err = DownloadError.timeout(entry.file.url.lastPathComponent)
+                    try emit(.downloadFail(url: entry.file.url, error: err))
+                    failed.append((entry.file, err))
+                    inFlight.removeValue(forKey: key)
+                } else {
+                    let elapsed = Date().timeIntervalSince(entry.started)
+                    try emit(.downloadTick(url: entry.file.url, elapsed: elapsed))
+                }
+            }
+
+            try dispatchMore()
+
+            if !inFlight.isEmpty {
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+        }
+
+        if let (file, _) = failed.first {
+            throw DownloadError.timeout("\(failed.count) file(s), first: \(file.url.lastPathComponent)")
+        }
+    }
+
+    static func ensureLocal(_ file: ICloudFile, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
+        try ensureLocalBatch([file], timeout: timeout, dryRun: dryRun) { _ in }
+    }
+
+    static func ensureLocal(_ url: URL, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
+        let file = try ICloudFile.from(url: url, checkPin: false)
+        try ensureLocal(file, timeout: timeout, dryRun: dryRun)
     }
 }

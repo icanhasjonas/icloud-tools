@@ -16,6 +16,7 @@ struct PinCommand: ParsableCommand {
               icloud pin --from-tag Green+Important -r .
               icloud pin --from-tag Red --from-tag Blue
               icloud pin --dry-run --from-tag Green
+              icloud pin --json -r dir/ | jq -s .         # NDJSON -> array
             """
     )
 

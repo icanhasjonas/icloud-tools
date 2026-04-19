@@ -14,6 +14,7 @@ struct DownloadCommand: ParsableCommand {
               icloud download -rv Documents/
               icloud download --dry-run -r .
               icloud download --json --timeout 60 big.zip
+              icloud download --json -r dir/ | jq -s .    # NDJSON -> array
             """
     )
 
@@ -43,8 +44,7 @@ struct DownloadCommand: ParsableCommand {
 
     func run() throws {
         let fm = FileManager.default
-        var totalFiles = 0
-        var totalBytes: Int64 = 0
+        var allFiles: [ICloudFile] = []
 
         for path in paths {
             let url = PathResolver.resolve(path)
@@ -58,54 +58,67 @@ struct DownloadCommand: ParsableCommand {
                 throw ValidationError("\(url.lastPathComponent) is a directory (use -r)")
             }
 
-            let rebase = PathResolver.Rebase(url)
+            allFiles.append(contentsOf: try Downloader.enumerate(url))
+        }
 
-            try Downloader.ensureLocalRecursive(url, timeout: TimeInterval(timeout), dryRun: dryRun) { event in
-                let file = event.file
-                let display = PathResolver.relativePath(file.url, rebase: rebase)
-                let size = Output.humanSize(file.fileSize)
+        let pending = allFiles.filter { Downloader.needsDownload($0) }
 
-                switch event {
-                case .starting:
-                    if verbose && !json {
-                        print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                    }
-                case .done:
-                    totalFiles += 1
-                    totalBytes += file.fileSize
-                    if json {
-                        try Output.printJSONLine(DownloadResult(
-                            path: file.url.path, name: file.name,
-                            size: file.fileSize, status: "downloaded"))
-                    } else if verbose {
-                        print("  \(Output.green)done\(Output.reset) \(display)")
-                    }
-                case .wouldDownload:
-                    totalFiles += 1
-                    totalBytes += file.fileSize
-                    if json {
-                        try Output.printJSONLine(DownloadResult(
-                            path: file.url.path, name: file.name,
-                            size: file.fileSize, status: "would-download"))
-                    } else {
-                        print("  \(Output.dim)would download\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                    }
-                case .skipped:
-                    if json {
-                        try Output.printJSONLine(DownloadResult(
-                            path: file.url.path, name: file.name,
-                            size: file.fileSize, status: "already-local"))
-                    } else if verbose {
-                        print("  \(Output.green)local\(Output.reset) \(display)")
-                    }
+        if dryRun {
+            for f in pending {
+                let display = PathResolver.relativePath(f.url)
+                let size = Output.humanSize(f.fileSize)
+                if json {
+                    try Output.printJSONLine(DownloadResult(
+                        path: f.url.path, name: f.name,
+                        size: f.fileSize, status: "would-download"))
+                } else {
+                    print("\(display) \(Output.dim)(\(size))\(Output.reset) \(Output.dim)would download\(Output.reset)")
                 }
+            }
+            if !json && !pending.isEmpty {
+                let total = pending.reduce(Int64(0)) { $0 + $1.fileSize }
+                print("\n\(Output.dim)\(pending.count) file\(pending.count == 1 ? "" : "s") to download (\(Output.humanSize(total)))\(Output.reset)")
+            }
+            return
+        }
+
+        var doneCount = 0
+        var doneBytes: Int64 = 0
+
+        try Downloader.ensureLocalBatch(allFiles, timeout: TimeInterval(timeout), dryRun: false) { event in
+            switch event {
+            case .downloadStart(let url, let size):
+                if verbose && !json {
+                    print("\(PathResolver.relativePath(url)) \(Output.dim)(\(Output.humanSize(size)))\(Output.reset)")
+                    print("  \(Output.yellow)downloading...\(Output.reset)")
+                }
+            case .downloadDone(let url, let size, let elapsed):
+                doneCount += 1
+                doneBytes += size
+                if json {
+                    try Output.printJSONLine(DownloadResult(
+                        path: url.path, name: url.lastPathComponent,
+                        size: size, status: "downloaded"))
+                } else if verbose {
+                    print("  \(Output.green)downloaded\(Output.reset) \(Output.dim)(\(String(format: "%.1fs", elapsed)))\(Output.reset)")
+                } else {
+                    print("\(Output.green)✓\(Output.reset) \(PathResolver.relativePath(url)) \(Output.dim)(\(Output.humanSize(size)), \(String(format: "%.1fs", elapsed)))\(Output.reset)")
+                }
+            case .downloadFail(let url, let error):
+                if json {
+                    try Output.printJSONLine(DownloadResult(
+                        path: url.path, name: url.lastPathComponent,
+                        size: 0, status: "failed"))
+                } else {
+                    print("\(Output.red)✗\(Output.reset) \(PathResolver.relativePath(url)): \(error.localizedDescription)")
+                }
+            default:
+                break
             }
         }
 
-        if !json && !dryRun && totalFiles > 0 {
-            print("\n\(Output.green)\(totalFiles) file\(totalFiles == 1 ? "" : "s") downloaded\(Output.reset) \(Output.dim)(\(Output.humanSize(totalBytes)))\(Output.reset)")
-        } else if !json && dryRun && totalFiles > 0 {
-            print("\n\(Output.dim)\(totalFiles) file\(totalFiles == 1 ? "" : "s") to download (\(Output.humanSize(totalBytes)))\(Output.reset)")
+        if !json && doneCount > 0 {
+            print("\n\(Output.green)\(doneCount) file\(doneCount == 1 ? "" : "s") downloaded\(Output.reset) \(Output.dim)(\(Output.humanSize(doneBytes)))\(Output.reset)")
         }
     }
 }

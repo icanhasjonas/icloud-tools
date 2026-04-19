@@ -12,8 +12,9 @@ struct MoveCommand: ParsableCommand {
             EXAMPLES:
               icloud mv file.pdf ~/Desktop/
               icloud mv -v a.pdf b.pdf dest/
-              icloud mv -fn old.pdf new.pdf
+              icloud mv -f old.pdf new.pdf
               icloud mv --dry-run src.pdf dest/
+              icloud mv --json a b dest/ | jq -s .        # NDJSON -> array
             """
     )
 
@@ -42,17 +43,18 @@ struct MoveCommand: ParsableCommand {
     }
 
     func run() throws {
+        let renderer = RendererFactory.make(verbose: verbose, json: json, dryRun: dryRun)
         try FileOperation.execute(
             paths: paths,
             verb: .move,
             allowDirectories: true,
             force: force,
             noClobber: noClobber,
-            verbose: verbose || dryRun,
-            json: json,
-            dryRun: dryRun
+            dryRun: dryRun,
+            renderer: renderer
         ) { fm, src, dest in
             try fm.moveItem(at: src, to: dest)
         }
+        try renderer.finish()
     }
 }

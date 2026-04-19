@@ -14,6 +14,7 @@ struct UnpinCommand: ParsableCommand {
               icloud unpin -r Documents/
               icloud unpin --from-tag Green
               icloud unpin --dry-run -r .
+              icloud unpin --json -r dir/ | jq -s .       # NDJSON -> array
             """
     )
 

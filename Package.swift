@@ -16,5 +16,10 @@ let package = Package(
             ],
             path: "Sources/icloud"
         ),
+        .testTarget(
+            name: "icloudTests",
+            dependencies: ["icloud"],
+            path: "Tests/icloudTests"
+        ),
     ]
 )

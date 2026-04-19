@@ -14,6 +14,7 @@ struct EvictCommand: ParsableCommand {
               icloud evict -rv old-projects/
               icloud evict --dry-run -r .
               icloud evict --json big.zip
+              icloud evict --json -r dir/ | jq -s .       # NDJSON -> array
             """
     )
 

@@ -13,8 +13,9 @@ struct CopyCommand: ParsableCommand {
             EXAMPLES:
               icloud cp file.pdf ~/Desktop/
               icloud cp -rv Documents/ ~/backup/
-              icloud cp -fn a.pdf b.pdf dest/
+              icloud cp -f a.pdf b.pdf dest/
               icloud cp --dry-run src.pdf dest/
+              icloud cp --json -r dir/ dest/ | jq -s .    # NDJSON -> array
             """
     )
 
@@ -46,17 +47,18 @@ struct CopyCommand: ParsableCommand {
     }
 
     func run() throws {
+        let renderer = RendererFactory.make(verbose: verbose, json: json, dryRun: dryRun)
         try FileOperation.execute(
             paths: paths,
             verb: .copy,
             allowDirectories: recursive,
             force: force,
             noClobber: noClobber,
-            verbose: verbose || dryRun,
-            json: json,
-            dryRun: dryRun
+            dryRun: dryRun,
+            renderer: renderer
         ) { fm, src, dest in
             try fm.copyItem(at: src, to: dest)
         }
+        try renderer.finish()
     }
 }
