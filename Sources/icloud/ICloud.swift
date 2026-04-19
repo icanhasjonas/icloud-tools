@@ -6,7 +6,7 @@ struct ICloud: ParsableCommand {
         commandName: "icloud",
         abstract: "Manage iCloud Drive files from the command line.",
         version: "0.3.1",
-        subcommands: [StatusCommand.self, MoveCommand.self, CopyCommand.self],
+        subcommands: [StatusCommand.self, DownloadCommand.self, EvictCommand.self, MoveCommand.self, CopyCommand.self],
         defaultSubcommand: StatusCommand.self
     )
 }
