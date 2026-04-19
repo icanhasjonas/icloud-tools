@@ -55,4 +55,25 @@ final class DownloaderTests: XCTestCase {
         // fileSize == 0 && allocated == 0 is an empty file, not dataless
         XCTAssertFalse(Downloader.needsDownload(makeFile(status: .local, size: 0, allocated: 0)))
     }
+
+    // Timeout scales with file size but never drops below the baseline floor.
+
+    func testTimeoutSmallFileUsesBaseline() {
+        XCTAssertEqual(Downloader.timeoutFor(sizeBytes: 1_000_000, baseline: 120), 120)
+    }
+
+    func testTimeout100MBHitsTwoMinutes() {
+        // 100 MB * 1.2 s/MB = 120 s
+        XCTAssertEqual(Downloader.timeoutFor(sizeBytes: 100_000_000, baseline: 120), 120)
+    }
+
+    func testTimeout2GBScalesUp() {
+        // 2000 MB * 1.2 = 2400 s (40 min)
+        XCTAssertEqual(Downloader.timeoutFor(sizeBytes: 2_000_000_000, baseline: 120), 2400)
+    }
+
+    func testTimeoutBaselineFloorRespected() {
+        // Tiny file, but baseline kept at floor
+        XCTAssertEqual(Downloader.timeoutFor(sizeBytes: 0, baseline: 60), 60)
+    }
 }

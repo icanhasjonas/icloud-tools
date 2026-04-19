@@ -36,6 +36,12 @@ struct MoveCommand: ParsableCommand {
     @Flag(help: "NDJSON output.")
     var json = false
 
+    @Option(name: [.customShort("j"), .long], help: "Max concurrent downloads.")
+    var maxConcurrent: Int = Downloader.defaultMaxConcurrent
+
+    @Option(name: [.customShort("t"), .long], help: "Base download timeout (sec). Per file: max(base, size_mb * 1.2).")
+    var timeout: Int = Int(Downloader.defaultBaselineTimeout)
+
     func validate() throws {
         guard paths.count >= 2 else {
             throw ValidationError("Usage: icloud mv [-fnvd] source... dest")
@@ -51,6 +57,8 @@ struct MoveCommand: ParsableCommand {
             force: force,
             noClobber: noClobber,
             dryRun: dryRun,
+            baselineTimeout: TimeInterval(timeout),
+            maxConcurrent: maxConcurrent,
             renderer: renderer
         ) { fm, src, dest in
             try fm.moveItem(at: src, to: dest)

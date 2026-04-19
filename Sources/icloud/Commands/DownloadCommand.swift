@@ -33,8 +33,11 @@ struct DownloadCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Preview without downloading.")
     var dryRun = false
 
-    @Option(name: .shortAndLong, help: "Seconds to wait per file.")
-    var timeout: Int = 300
+    @Option(name: [.customShort("t"), .long], help: "Base download timeout (sec). Per file: max(base, size_mb * 1.2).")
+    var timeout: Int = Int(Downloader.defaultBaselineTimeout)
+
+    @Option(name: [.customShort("j"), .long], help: "Max concurrent downloads.")
+    var maxConcurrent: Int = Downloader.defaultMaxConcurrent
 
     func validate() throws {
         guard !paths.isEmpty else {
@@ -85,7 +88,12 @@ struct DownloadCommand: ParsableCommand {
         var doneCount = 0
         var doneBytes: Int64 = 0
 
-        try Downloader.ensureLocalBatch(allFiles, timeout: TimeInterval(timeout), dryRun: false) { event in
+        try Downloader.ensureLocalBatch(
+            allFiles,
+            baselineTimeout: TimeInterval(timeout),
+            maxConcurrent: maxConcurrent,
+            dryRun: false
+        ) { event in
             switch event {
             case .downloadStart(let url, let size):
                 if verbose && !json {

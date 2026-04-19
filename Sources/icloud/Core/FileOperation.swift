@@ -15,7 +15,8 @@ struct FileOperation {
         force: Bool,
         noClobber: Bool,
         dryRun: Bool = false,
-        timeout: TimeInterval = 300,
+        baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout,
+        maxConcurrent: Int = Downloader.defaultMaxConcurrent,
         renderer: OpRenderer,
         operation: (FileManager, URL, URL) throws -> Void
     ) throws {
@@ -36,7 +37,8 @@ struct FileOperation {
         for source in sources {
             try processSource(
                 source: source, verb: verb, allowDirectories: allowDirectories,
-                force: force, noClobber: noClobber, dryRun: dryRun, timeout: timeout,
+                force: force, noClobber: noClobber, dryRun: dryRun,
+                baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
                 destURL: destURL, destExists: destExists, destIsDir: destIsDir.boolValue,
                 renderer: renderer, operation: operation
             )
@@ -45,7 +47,8 @@ struct FileOperation {
 
     private static func processSource(
         source: String, verb: FileVerb, allowDirectories: Bool,
-        force: Bool, noClobber: Bool, dryRun: Bool, timeout: TimeInterval,
+        force: Bool, noClobber: Bool, dryRun: Bool,
+        baselineTimeout: TimeInterval, maxConcurrent: Int,
         destURL: URL, destExists: Bool, destIsDir: Bool,
         renderer: OpRenderer,
         operation: (FileManager, URL, URL) throws -> Void
@@ -99,7 +102,12 @@ struct FileOperation {
         let files = try Downloader.enumerate(srcURL)
         let pendingCount = files.filter { Downloader.needsDownload($0) }.count
         try renderer.handle(.phaseStart(phase: .download, totalFiles: pendingCount))
-        try Downloader.ensureLocalBatch(files, timeout: timeout, dryRun: false) { event in
+        try Downloader.ensureLocalBatch(
+            files,
+            baselineTimeout: baselineTimeout,
+            maxConcurrent: maxConcurrent,
+            dryRun: false
+        ) { event in
             try renderer.handle(event)
         }
         try renderer.handle(.phaseEnd(phase: .download))

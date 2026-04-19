@@ -51,29 +51,42 @@ struct Downloader {
         return result
     }
 
-    static let maxConcurrent = 10
+    static let defaultMaxConcurrent = 3
+    static let defaultBaselineTimeout: TimeInterval = 120
+    static let secondsPerMB: Double = 1.2
+
+    /// Per-file timeout that scales with file size. ~100 MB => ~2 minutes, ~2 GB => ~40 minutes,
+    /// small files get the baseline floor so cold TLS/handshakes don't trip.
+    static func timeoutFor(sizeBytes: Int64, baseline: TimeInterval) -> TimeInterval {
+        let sizeMB = Double(sizeBytes) / 1_000_000
+        let scaled = sizeMB * secondsPerMB
+        return max(baseline, scaled)
+    }
 
     static func ensureLocalBatch(
         _ files: [ICloudFile],
-        timeout: TimeInterval,
+        baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout,
+        maxConcurrent: Int = Downloader.defaultMaxConcurrent,
         dryRun: Bool,
         emit: (OpEvent) throws -> Void
     ) throws {
         var queue = files.filter { needsDownload($0) }
         if queue.isEmpty || dryRun { return }
 
+        let cap = max(1, maxConcurrent)
         var inFlight: [String: (file: ICloudFile, started: Date, deadline: Date)] = [:]
         var failed: [(ICloudFile, Error)] = []
 
         func dispatchMore() throws {
-            while inFlight.count < maxConcurrent, !queue.isEmpty {
+            while inFlight.count < cap, !queue.isEmpty {
                 let f = queue.removeFirst()
                 if f.status != .downloading {
                     try FileManager.default.startDownloadingUbiquitousItem(at: f.url)
                 }
                 try emit(.downloadStart(url: f.url, size: f.fileSize))
                 let now = Date()
-                inFlight[f.url.path] = (f, now, now.addingTimeInterval(timeout))
+                let t = timeoutFor(sizeBytes: f.fileSize, baseline: baselineTimeout)
+                inFlight[f.url.path] = (f, now, now.addingTimeInterval(t))
             }
         }
 
@@ -121,12 +134,12 @@ struct Downloader {
         }
     }
 
-    static func ensureLocal(_ file: ICloudFile, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
-        try ensureLocalBatch([file], timeout: timeout, dryRun: dryRun) { _ in }
+    static func ensureLocal(_ file: ICloudFile, baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout, dryRun: Bool = false) throws {
+        try ensureLocalBatch([file], baselineTimeout: baselineTimeout, dryRun: dryRun) { _ in }
     }
 
-    static func ensureLocal(_ url: URL, timeout: TimeInterval = 300, dryRun: Bool = false) throws {
+    static func ensureLocal(_ url: URL, baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout, dryRun: Bool = false) throws {
         let file = try ICloudFile.from(url: url, checkPin: false)
-        try ensureLocal(file, timeout: timeout, dryRun: dryRun)
+        try ensureLocal(file, baselineTimeout: baselineTimeout, dryRun: dryRun)
     }
 }
