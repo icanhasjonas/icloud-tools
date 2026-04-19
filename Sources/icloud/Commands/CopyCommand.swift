@@ -14,7 +14,7 @@ struct CopyCommand: ParsableCommand {
               icloud cp file.pdf ~/Desktop/
               icloud cp -rv Documents/ ~/backup/
               icloud cp -fn a.pdf b.pdf dest/
-              icloud cp --json src.pdf dest/
+              icloud cp --dry-run src.pdf dest/
             """
     )
 
@@ -33,12 +33,15 @@ struct CopyCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
+    @Flag(name: .shortAndLong, help: "Preview without copying.")
+    var dryRun = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
     func validate() throws {
         guard paths.count >= 2 else {
-            throw ValidationError("Usage: icloud cp [-rfnv] source... dest")
+            throw ValidationError("Usage: icloud cp [-rfnvd] source... dest")
         }
     }
 
@@ -49,8 +52,9 @@ struct CopyCommand: ParsableCommand {
             allowDirectories: recursive,
             force: force,
             noClobber: noClobber,
-            verbose: verbose,
-            json: json
+            verbose: verbose || dryRun,
+            json: json,
+            dryRun: dryRun
         ) { fm, src, dest in
             try fm.copyItem(at: src, to: dest)
         }

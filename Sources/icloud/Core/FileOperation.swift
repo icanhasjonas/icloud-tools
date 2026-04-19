@@ -16,6 +16,7 @@ struct FileOperation {
         noClobber: Bool,
         verbose: Bool,
         json: Bool,
+        dryRun: Bool = false,
         operation: (FileManager, URL, URL) throws -> Void
     ) throws {
         let fm = FileManager.default
@@ -41,38 +42,53 @@ struct FileOperation {
             }
 
             let fileInfo = try ICloudFile.from(url: srcURL, checkPin: false)
-
             let srcDisplay = PathResolver.relativePath(srcURL)
-
-            if verbose && !json && !srcIsDir.boolValue {
-                let size = Output.humanSize(fileInfo.fileSize)
-                let sizeStr = size.isEmpty ? "" : " \(Output.dim)(\(size))\(Output.reset)"
-                print("\(Output.dim)downloading\(Output.reset) \(srcDisplay)\(sizeStr)")
-            }
-
-            if srcIsDir.boolValue {
-                let rebase = PathResolver.Rebase(srcURL)
-                try Downloader.ensureLocalRecursive(srcURL) { event in
-                    guard verbose && !json else { return }
-                    switch event {
-                    case .starting(let f):
-                        let display = PathResolver.relativePath(f.url, rebase: rebase)
-                        let size = Output.humanSize(f.fileSize)
-                        print("  \(Output.yellow)downloading\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
-                    case .done(let f):
-                        let display = PathResolver.relativePath(f.url, rebase: rebase)
-                        print("  \(Output.green)done\(Output.reset) \(display)")
-                    case .skipped:
-                        break
-                    }
-                }
-            } else {
-                try Downloader.ensureLocal(srcURL)
-            }
-
             let finalDest = destExists && destIsDir.boolValue
                 ? destURL.appendingPathComponent(srcURL.lastPathComponent)
                 : destURL
+            let destDisplay = PathResolver.relativePath(finalDest)
+
+            if srcIsDir.boolValue {
+                let rebase = PathResolver.Rebase(srcURL)
+                let srcResolved = srcURL.resolvingSymlinksInPath().path
+                try Downloader.ensureLocalRecursive(srcURL) { event in
+                    switch event {
+                    case .starting(let f):
+                        guard verbose && !json else { return }
+                        let display = PathResolver.relativePath(f.url, rebase: rebase)
+                        let size = Output.humanSize(f.fileSize)
+                        print("\(display) \(Output.dim)(\(size))\(Output.reset)")
+                        print("  \(Output.yellow)downloading...\(Output.reset)")
+                    case .done(let f):
+                        guard verbose && !json else { return }
+                        let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
+                        let toURL = finalDest.appendingPathComponent(childRelative)
+                        let toDisplay = PathResolver.relativePath(toURL)
+                        print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                    case .skipped(let f):
+                        guard verbose && !json else { return }
+                        let display = PathResolver.relativePath(f.url, rebase: rebase)
+                        let size = Output.humanSize(f.fileSize)
+                        let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
+                        let toURL = finalDest.appendingPathComponent(childRelative)
+                        let toDisplay = PathResolver.relativePath(toURL)
+                        print("\(display) \(Output.dim)(\(size))\(Output.reset)")
+                        print("  \(Output.green)\(verb)\(Output.reset) -> \(toDisplay)")
+                    }
+                }
+            } else {
+                let needsDownload = fileInfo.isUbiquitous && fileInfo.status == .cloud
+                let size = Output.humanSize(fileInfo.fileSize)
+
+                if verbose && !json {
+                    print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
+                    if needsDownload {
+                        print("  \(Output.yellow)downloading...\(Output.reset)")
+                    }
+                }
+
+                try Downloader.ensureLocal(srcURL)
+            }
 
             if fm.fileExists(atPath: finalDest.path) {
                 if noClobber {
@@ -81,7 +97,7 @@ struct FileOperation {
                             source: srcURL.path, destination: finalDest.path,
                             status: "skipped", size: fileInfo.fileSize))
                     } else if verbose {
-                        print("\(Output.yellow)skipped\(Output.reset) \(srcDisplay) (exists)")
+                        print("  \(Output.yellow)skipped\(Output.reset) (exists)")
                     }
                     continue
                 }
@@ -92,17 +108,30 @@ struct FileOperation {
                 }
             }
 
+            if dryRun {
+                if json {
+                    try Output.printJSONLine(FileOperationResult(
+                        source: srcURL.path, destination: finalDest.path,
+                        status: "would-\(verb == "moved" ? "move" : "copy")",
+                        size: fileInfo.fileSize))
+                } else {
+                    if !srcIsDir.boolValue && !verbose {
+                        let size = Output.humanSize(fileInfo.fileSize)
+                        print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
+                    }
+                    print("  \(Output.dim)would \(verb == "moved" ? "move" : "copy")\(Output.reset) -> \(destDisplay)")
+                }
+                continue
+            }
+
             try operation(fm, srcURL, finalDest)
 
             if json {
                 try Output.printJSONLine(FileOperationResult(
                     source: srcURL.path, destination: finalDest.path,
                     status: verb, size: fileInfo.fileSize))
-            } else if verbose {
-                let size = Output.humanSize(fileInfo.fileSize)
-                let sizeStr = size.isEmpty ? "" : " \(Output.dim)(\(size))\(Output.reset)"
-                let destDisplay = PathResolver.relativePath(finalDest)
-                print("\(Output.green)\(verb)\(Output.reset) \(srcDisplay) -> \(destDisplay)\(sizeStr)")
+            } else if verbose && !srcIsDir.boolValue {
+                print("  \(Output.green)\(verb)\(Output.reset) -> \(destDisplay)")
             }
         }
     }

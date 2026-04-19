@@ -13,7 +13,7 @@ struct MoveCommand: ParsableCommand {
               icloud mv file.pdf ~/Desktop/
               icloud mv -v a.pdf b.pdf dest/
               icloud mv -fn old.pdf new.pdf
-              icloud mv --json src.pdf dest/
+              icloud mv --dry-run src.pdf dest/
             """
     )
 
@@ -29,12 +29,15 @@ struct MoveCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Verbose output.")
     var verbose = false
 
+    @Flag(name: .shortAndLong, help: "Preview without moving.")
+    var dryRun = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
     func validate() throws {
         guard paths.count >= 2 else {
-            throw ValidationError("Usage: icloud mv [-fnv] source... dest")
+            throw ValidationError("Usage: icloud mv [-fnvd] source... dest")
         }
     }
 
@@ -45,8 +48,9 @@ struct MoveCommand: ParsableCommand {
             allowDirectories: true,
             force: force,
             noClobber: noClobber,
-            verbose: verbose,
-            json: json
+            verbose: verbose || dryRun,
+            json: json,
+            dryRun: dryRun
         ) { fm, src, dest in
             try fm.moveItem(at: src, to: dest)
         }

@@ -7,7 +7,7 @@ struct ICloud: ParsableCommand {
         abstract: "Manage iCloud Drive files.",
         discussion: "Replacement for brctl download/evict (removed in macOS 14+).",
         version: version,
-        subcommands: [StatusCommand.self, DownloadCommand.self, EvictCommand.self, MoveCommand.self, CopyCommand.self],
+        subcommands: [StatusCommand.self, DownloadCommand.self, EvictCommand.self, PinCommand.self, UnpinCommand.self, MoveCommand.self, CopyCommand.self],
         defaultSubcommand: StatusCommand.self
     )
 }
