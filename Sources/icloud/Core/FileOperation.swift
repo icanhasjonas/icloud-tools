@@ -51,14 +51,35 @@ struct FileOperation {
             let destDisplay = PathResolver.relativePath(finalDest)
 
             if dryRun {
-                if json {
-                    try Output.printJSONLine(FileOperationResult(
-                        source: srcURL.path, destination: finalDest.path,
-                        status: "would-\(actionVerb)", size: fileInfo.fileSize))
+                if srcIsDir.boolValue {
+                    let rebase = PathResolver.Rebase(srcURL)
+                    let srcResolved = srcURL.resolvingSymlinksInPath().path
+                    let result = try Scanner.scan(directory: srcURL, recursive: true)
+                    for file in result.files {
+                        let display = PathResolver.relativePath(file.url, rebase: rebase)
+                        let size = Output.humanSize(file.fileSize)
+                        let childRelative = String(file.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
+                        let toURL = finalDest.appendingPathComponent(childRelative)
+                        let toDisplay = PathResolver.relativePath(toURL)
+                        if json {
+                            try Output.printJSONLine(FileOperationResult(
+                                source: file.url.path, destination: toURL.path,
+                                status: "would-\(actionVerb)", size: file.fileSize))
+                        } else {
+                            print("\(display) \(Output.dim)(\(size))\(Output.reset)")
+                            print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(toDisplay)")
+                        }
+                    }
                 } else {
                     let size = Output.humanSize(fileInfo.fileSize)
-                    print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
-                    print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
+                    if json {
+                        try Output.printJSONLine(FileOperationResult(
+                            source: srcURL.path, destination: finalDest.path,
+                            status: "would-\(actionVerb)", size: fileInfo.fileSize))
+                    } else {
+                        print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
+                        print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
+                    }
                 }
                 continue
             }
