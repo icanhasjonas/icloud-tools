@@ -29,6 +29,8 @@ struct FileOperation {
             throw FileOperationError.destinationNotDirectory
         }
 
+        let actionVerb = verb == "moved" ? "move" : "copy"
+
         for source in sources {
             let srcURL = PathResolver.resolve(source)
             var srcIsDir: ObjCBool = false
@@ -48,6 +50,19 @@ struct FileOperation {
                 : destURL
             let destDisplay = PathResolver.relativePath(finalDest)
 
+            if dryRun {
+                if json {
+                    try Output.printJSONLine(FileOperationResult(
+                        source: srcURL.path, destination: finalDest.path,
+                        status: "would-\(actionVerb)", size: fileInfo.fileSize))
+                } else {
+                    let size = Output.humanSize(fileInfo.fileSize)
+                    print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
+                    print("  \(Output.dim)would \(actionVerb)\(Output.reset) -> \(destDisplay)")
+                }
+                continue
+            }
+
             if srcIsDir.boolValue {
                 let rebase = PathResolver.Rebase(srcURL)
                 let srcResolved = srcURL.resolvingSymlinksInPath().path
@@ -61,6 +76,7 @@ struct FileOperation {
                         print("  \(Output.yellow)downloading...\(Output.reset)")
                     case .done(let f):
                         guard verbose && !json else { return }
+                        let fromDisplay = PathResolver.relativePath(f.url, rebase: rebase)
                         let childRelative = String(f.url.resolvingSymlinksInPath().path.dropFirst(srcResolved.count))
                         let toURL = finalDest.appendingPathComponent(childRelative)
                         let toDisplay = PathResolver.relativePath(toURL)
@@ -106,22 +122,6 @@ struct FileOperation {
                 } else {
                     throw FileOperationError.destinationExists(finalDest.path)
                 }
-            }
-
-            if dryRun {
-                if json {
-                    try Output.printJSONLine(FileOperationResult(
-                        source: srcURL.path, destination: finalDest.path,
-                        status: "would-\(verb == "moved" ? "move" : "copy")",
-                        size: fileInfo.fileSize))
-                } else {
-                    if !srcIsDir.boolValue && !verbose {
-                        let size = Output.humanSize(fileInfo.fileSize)
-                        print("\(srcDisplay) \(Output.dim)(\(size))\(Output.reset)")
-                    }
-                    print("  \(Output.dim)would \(verb == "moved" ? "move" : "copy")\(Output.reset) -> \(destDisplay)")
-                }
-                continue
             }
 
             try operation(fm, srcURL, finalDest)
