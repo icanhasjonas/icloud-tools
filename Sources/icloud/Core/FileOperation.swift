@@ -93,18 +93,12 @@ struct FileOperation {
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         print("  \(Output.yellow)downloading...\(Output.reset)")
                     case .done:
-                        print("  \(Output.green)\(verb.past)\(Output.reset) -> \(toDisplay)")
+                        print("  \(Output.green)ready\(Output.reset)")
                     case .wouldDownload:
                         print("\(display) \(Output.dim)(\(size))\(Output.reset)")
                         print("  \(Output.dim)would download\(Output.reset)")
-                        print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(toDisplay)")
                     case .skipped:
-                        print("\(display) \(Output.dim)(\(size))\(Output.reset)")
-                        if dryRun {
-                            print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(toDisplay)")
-                        } else {
-                            print("  \(Output.green)\(verb.past)\(Output.reset) -> \(toDisplay)")
-                        }
+                        break
                     }
                 }
             } else {
@@ -150,7 +144,7 @@ struct FileOperation {
                     try Output.printJSONLine(FileOperationResult(
                         source: srcURL.path, destination: finalDest.path,
                         status: "would-\(verb.present)", size: fileInfo.fileSize))
-                } else if !srcIsDir.boolValue {
+                } else {
                     print("  \(Output.dim)would \(verb.present)\(Output.reset) -> \(destDisplay)")
                 }
             } else {
@@ -160,8 +154,8 @@ struct FileOperation {
                     try Output.printJSONLine(FileOperationResult(
                         source: srcURL.path, destination: finalDest.path,
                         status: verb.past, size: fileInfo.fileSize))
-                } else if verbose && !srcIsDir.boolValue {
-                    print("  \(Output.green)\(verb.past)\(Output.reset) -> \(destDisplay)")
+                } else if verbose {
+                    print("\(Output.green)\(verb.past)\(Output.reset) \(srcDisplay) -> \(destDisplay)")
                 }
             }
         }
