@@ -4,6 +4,7 @@ struct FileOperationResult: Encodable {
     let source: String
     let destination: String
     let status: String
+    let size: Int64
 }
 
 struct FileOperation {
@@ -39,8 +40,14 @@ struct FileOperation {
                 throw FileOperationError.directoryRequiresRecursive(srcURL.lastPathComponent)
             }
 
+            let fileInfo = try ICloudFile.from(url: srcURL, checkPin: false)
+
+            let srcDisplay = PathResolver.relativePath(srcURL)
+
             if verbose && !json {
-                print("\(Output.dim)downloading\(Output.reset) \(srcURL.lastPathComponent)")
+                let size = Output.humanSize(fileInfo.fileSize)
+                let sizeStr = size.isEmpty ? "" : " \(Output.dim)(\(size))\(Output.reset)"
+                print("\(Output.dim)downloading\(Output.reset) \(srcDisplay)\(sizeStr)")
             }
 
             if srcIsDir.boolValue {
@@ -61,9 +68,10 @@ struct FileOperation {
                 if noClobber {
                     if json {
                         try Output.printJSONLine(FileOperationResult(
-                            source: srcURL.path, destination: finalDest.path, status: "skipped"))
+                            source: srcURL.path, destination: finalDest.path,
+                            status: "skipped", size: fileInfo.fileSize))
                     } else if verbose {
-                        print("\(Output.yellow)skipped\(Output.reset) \(srcURL.lastPathComponent) (exists)")
+                        print("\(Output.yellow)skipped\(Output.reset) \(srcDisplay) (exists)")
                     }
                     continue
                 }
@@ -78,9 +86,13 @@ struct FileOperation {
 
             if json {
                 try Output.printJSONLine(FileOperationResult(
-                    source: srcURL.path, destination: finalDest.path, status: verb))
+                    source: srcURL.path, destination: finalDest.path,
+                    status: verb, size: fileInfo.fileSize))
             } else if verbose {
-                print("\(Output.green)\(verb)\(Output.reset) \(srcURL.lastPathComponent) -> \(finalDest.path)")
+                let size = Output.humanSize(fileInfo.fileSize)
+                let sizeStr = size.isEmpty ? "" : " \(Output.dim)(\(size))\(Output.reset)"
+                let destDisplay = PathResolver.relativePath(finalDest)
+                print("\(Output.green)\(verb)\(Output.reset) \(srcDisplay) -> \(destDisplay)\(sizeStr)")
             }
         }
     }
