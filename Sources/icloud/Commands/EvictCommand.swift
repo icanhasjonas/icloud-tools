@@ -17,7 +17,7 @@ struct EvictCommand: ParsableCommand {
             """
     )
 
-    @Argument(parsing: .allUnrecognized, help: "path...")
+    @Argument(help: "path...")
     var paths: [String]
 
     @Flag(name: .shortAndLong, help: "Evict directories recursively.")

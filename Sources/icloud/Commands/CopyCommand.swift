@@ -18,7 +18,7 @@ struct CopyCommand: ParsableCommand {
             """
     )
 
-    @Argument(parsing: .allUnrecognized, help: "source... dest")
+    @Argument(help: "source... dest")
     var paths: [String]
 
     @Flag(name: .shortAndLong, help: "Copy directories recursively.")
