@@ -15,7 +15,7 @@ Apple removed `brctl download` and `brctl evict` in macOS Sonoma 14+, and `filep
 ## Install
 
 ```bash
-git clone https://github.com/duplo/icloud-tools.git
+git clone https://github.com/icanhasjonas/icloud-tools.git
 cd icloud-tools
 swift build -c release
 cp .build/release/icloud ~/.local/bin/
