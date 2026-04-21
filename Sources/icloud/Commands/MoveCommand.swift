@@ -36,6 +36,9 @@ struct MoveCommand: ParsableCommand {
     @Flag(help: "Warn and continue if a source does not exist.")
     var ignoreMissing = false
 
+    @Flag(help: "With -n: if dst exists and file sizes match, delete source instead of skipping. Never downloads.")
+    var pruneSource = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
@@ -49,6 +52,9 @@ struct MoveCommand: ParsableCommand {
         guard paths.count >= 2 else {
             throw ValidationError("Usage: icloud mv [-fnvd] source... dest")
         }
+        if pruneSource && !noClobber {
+            throw ValidationError("--prune-source requires --no-clobber (-n).")
+        }
     }
 
     func run() throws {
@@ -60,6 +66,7 @@ struct MoveCommand: ParsableCommand {
             force: force,
             noClobber: noClobber,
             ignoreMissing: ignoreMissing,
+            pruneSource: pruneSource,
             dryRun: dryRun,
             baselineTimeout: TimeInterval(timeout),
             maxConcurrent: maxConcurrent,

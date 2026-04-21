@@ -19,6 +19,8 @@ final class TTYQuietRenderer: OpRenderer {
             print("\(rel(src)) \(Output.red)-x>\(Output.reset) \(rel(dst)) \(Output.red)(\(error.localizedDescription))\(Output.reset)")
         case .opSkipped(_, let src, let dst, let reason, _):
             print("\(rel(src)) \(Output.dim)->\(Output.reset) \(rel(dst)) \(Output.yellow)(skipped: \(reason))\(Output.reset)")
+        case .opPruned(_, let src, let dst, let size):
+            print("\(rel(src)) \(Output.cyan)~>\(Output.reset) \(rel(dst)) \(Output.dim)(pruned, \(Output.humanSize(size)) freed)\(Output.reset)")
         case .opWouldDo(let verb, let src, let dst, _):
             print("\(rel(src)) \(Output.dim)->\(Output.reset) \(rel(dst)) \(Output.dim)(would \(verb.present))\(Output.reset)")
         case .sourceMissing(let src):

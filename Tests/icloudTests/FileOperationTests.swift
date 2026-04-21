@@ -38,7 +38,7 @@ final class FileOperationTests: XCTestCase {
     }
 
     @discardableResult
-    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false) throws -> SilentRenderer {
+    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false, pruneSource: Bool = false) throws -> SilentRenderer {
         let renderer = SilentRenderer()
         let absolute = paths.map { workDir.appendingPathComponent($0).path }
         try FileOperation.execute(
@@ -48,6 +48,7 @@ final class FileOperationTests: XCTestCase {
             force: force,
             noClobber: noClobber,
             ignoreMissing: ignoreMissing,
+            pruneSource: pruneSource,
             renderer: renderer
         ) { fm, src, dst in
             try fm.moveItem(at: src, to: dst)
@@ -262,6 +263,89 @@ final class FileOperationTests: XCTestCase {
         XCTAssertTrue(exists("dst/deep/unrelated.txt"), "non-empty dir must NOT be removed")
     }
 
+    // MARK: - --prune-source
+
+    func testPruneSourceDeletesWhenSizeMatches() throws {
+        try write("hello world", to: "a.txt")          // 11 bytes
+        try write("hello world", to: "dst/a.txt")       // 11 bytes -- size match
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, pruneSource: true)
+
+        XCTAssertFalse(exists("a.txt"), "source must be unlinked when sizes match")
+        XCTAssertEqual(read("dst/a.txt"), "hello world", "destination must be untouched")
+        XCTAssertEqual(renderer.pruned.count, 1, "one opPruned event expected")
+        XCTAssertEqual(renderer.skipped.count, 0, "size-match should NOT emit opSkipped")
+    }
+
+    func testPruneSourceKeepsWhenSizeDiffers() throws {
+        try write("hello world", to: "a.txt")          // 11 bytes
+        try write("DIFFERENT CONTENT HERE", to: "dst/a.txt")  // 22 bytes -- size mismatch
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, pruneSource: true)
+
+        XCTAssertTrue(exists("a.txt"), "source must survive when sizes differ")
+        XCTAssertEqual(read("dst/a.txt"), "DIFFERENT CONTENT HERE", "destination must be untouched")
+        XCTAssertEqual(renderer.pruned.count, 0, "no prune on size mismatch")
+        XCTAssertEqual(renderer.skipped.count, 1, "falls through to normal noClobber skip")
+    }
+
+    func testPruneSourceMovesWhenDestAbsent() throws {
+        try write("hello", to: "a.txt")
+        try FileManager.default.createDirectory(at: workDir.appendingPathComponent("dst"), withIntermediateDirectories: true)
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, pruneSource: true)
+
+        XCTAssertFalse(exists("a.txt"), "source moved into dst")
+        XCTAssertEqual(read("dst/a.txt"), "hello")
+        XCTAssertEqual(renderer.pruned.count, 0, "flag is a no-op when dst doesn't exist")
+    }
+
+    func testPruneSourceRefusesSamePath() throws {
+        // src and dst point at the same file. Without the same-path guard we'd unlink
+        // the user's only copy. Regression guard.
+        try write("important", to: "a.txt")
+
+        let renderer = SilentRenderer()
+        let path = workDir.appendingPathComponent("a.txt").path
+
+        // Single source + single file dest = same-path move. Normally a no-op move.
+        // Execute WILL fail because default mv -n throws on existing dest, but we
+        // want the prune path to also refuse -- the file must survive either way.
+        _ = try? FileOperation.execute(
+            paths: [path, path],
+            verb: .move,
+            allowDirectories: true,
+            force: false, noClobber: true,
+            ignoreMissing: false, pruneSource: true,
+            renderer: renderer
+        ) { fm, src, dst in
+            try fm.moveItem(at: src, to: dst)
+        }
+
+        XCTAssertTrue(exists("a.txt"), "same-path prune must NEVER delete the only copy")
+        XCTAssertEqual(renderer.pruned.count, 0, "same-path must not emit opPruned")
+    }
+
+    func testPruneSourceMixedBatch() throws {
+        // 3 sources: one matches (prune), one mismatches (skip), one is new (move).
+        try write("same", to: "a.txt")
+        try write("same", to: "dst/a.txt")            // match -> prune
+        try write("big content here", to: "b.txt")
+        try write("small", to: "dst/b.txt")           // mismatch -> skip
+        try write("fresh", to: "c.txt")                // dst/c.txt doesn't exist -> move
+
+        let renderer = try runMove(["a.txt", "b.txt", "c.txt", "dst/"], noClobber: true, pruneSource: true)
+
+        XCTAssertFalse(exists("a.txt"), "pruned source gone")
+        XCTAssertTrue(exists("b.txt"), "skipped source remains")
+        XCTAssertFalse(exists("c.txt"), "moved source gone")
+        XCTAssertEqual(read("dst/a.txt"), "same", "pruned dst untouched")
+        XCTAssertEqual(read("dst/b.txt"), "small", "skipped dst untouched")
+        XCTAssertEqual(read("dst/c.txt"), "fresh", "moved dst populated")
+        XCTAssertEqual(renderer.pruned.count, 1)
+        XCTAssertEqual(renderer.skipped.count, 1)
+    }
+
     func testForceConflictWithBackupCleanedUp() throws {
         try write("NEW", to: "x.txt")
         try write("OLD", to: "dst/x.txt")
@@ -282,8 +366,15 @@ final class FileOperationTests: XCTestCase {
 private final class SilentRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
     private(set) var missing: [URL] = []
+    private(set) var pruned: [URL] = []
+    private(set) var skipped: [(URL, String)] = []
     func handle(_ event: OpEvent) throws {
-        if case .sourceMissing(let src) = event { missing.append(src) }
+        switch event {
+        case .sourceMissing(let src): missing.append(src)
+        case .opPruned(_, let src, _, _): pruned.append(src)
+        case .opSkipped(_, let src, _, let reason, _): skipped.append((src, reason))
+        default: break
+        }
     }
     func finish() throws {}
 }

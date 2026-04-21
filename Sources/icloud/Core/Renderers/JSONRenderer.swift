@@ -25,6 +25,8 @@ final class JSONRenderer: OpRenderer {
         let copied: Int
         let moved: Int
         let skipped: Int
+        let pruned: Int
+        let prunedBytes: Int64
         let failed: Int
         let timedOut: Int
         let notFound: Int
@@ -43,6 +45,8 @@ final class JSONRenderer: OpRenderer {
             r = rec(type: "op.fail", src: src.path, dst: dst.path, verb: verb.rawValue, error: error.localizedDescription)
         case .opSkipped(let verb, let src, let dst, let reason, let size):
             r = rec(type: "op.skipped", src: src.path, dst: dst.path, size: size, verb: verb.rawValue, reason: reason)
+        case .opPruned(let verb, let src, let dst, let size):
+            r = rec(type: "op.pruned", src: src.path, dst: dst.path, size: size, verb: verb.rawValue)
         case .opWouldDo(let verb, let src, let dst, let size):
             r = rec(type: "op.would", src: src.path, dst: dst.path, size: size, verb: verb.rawValue)
         case .sourceMissing(let src):
@@ -60,6 +64,8 @@ final class JSONRenderer: OpRenderer {
             copied: summary.copied,
             moved: summary.moved,
             skipped: summary.skipped,
+            pruned: summary.pruned,
+            prunedBytes: summary.prunedBytes,
             failed: summary.failed,
             timedOut: summary.timedOut,
             notFound: summary.notFound,

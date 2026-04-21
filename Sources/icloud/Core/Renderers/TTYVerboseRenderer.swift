@@ -27,6 +27,9 @@ final class TTYVerboseRenderer: OpRenderer {
         case .opSkipped(_, let src, let dst, let reason, _):
             header(for: src)
             print("  \(Output.yellow)skipped:\(Output.reset) \(rel(dst)) \(Output.dim)(\(reason))\(Output.reset)")
+        case .opPruned(_, let src, _, let size):
+            header(for: src)
+            print("  \(Output.cyan)pruned\(Output.reset) \(Output.dim)(dst matches, \(Output.humanSize(size)) freed)\(Output.reset)")
         case .opWouldDo(let verb, let src, let dst, _):
             header(for: src)
             print("  \(Output.dim)would \(verb.present) to\(Output.reset) \(rel(dst))")

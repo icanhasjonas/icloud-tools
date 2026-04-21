@@ -16,6 +16,7 @@ struct FileOperation {
         force: Bool,
         noClobber: Bool,
         ignoreMissing: Bool = false,
+        pruneSource: Bool = false,
         dryRun: Bool = false,
         baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout,
         maxConcurrent: Int = Downloader.defaultMaxConcurrent,
@@ -58,7 +59,8 @@ struct FileOperation {
             try processSource(
                 source: source, verb: verb, allowDirectories: allowDirectories,
                 force: force, noClobber: noClobber,
-                ignoreMissing: ignoreMissing, dryRun: dryRun,
+                ignoreMissing: ignoreMissing, pruneSource: pruneSource,
+                dryRun: dryRun,
                 baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
                 destURL: destURL, destExists: destExists, destIsDir: destIsDir.boolValue,
                 renderer: renderer, operation: operation
@@ -69,7 +71,7 @@ struct FileOperation {
     private static func processSource(
         source: String, verb: FileVerb, allowDirectories: Bool,
         force: Bool, noClobber: Bool,
-        ignoreMissing: Bool, dryRun: Bool,
+        ignoreMissing: Bool, pruneSource: Bool, dryRun: Bool,
         baselineTimeout: TimeInterval, maxConcurrent: Int,
         destURL: URL, destExists: Bool, destIsDir: Bool,
         renderer: OpRenderer,
@@ -125,13 +127,39 @@ struct FileOperation {
             return
         }
 
+        // --prune-source: filter files whose destination already exists with the same
+        // logical size. These are handled by a fast unlink -- never downloaded, never
+        // copied. The remaining files flow through the normal ready/needs-download
+        // split below.
+        var remaining = discovered
+        var prunable: [Discovered] = []
+        if pruneSource {
+            var rest: [Discovered] = []
+            for d in discovered {
+                if isPrunable(d, fm: fm) {
+                    prunable.append(d)
+                } else {
+                    rest.append(d)
+                }
+            }
+            remaining = rest
+        }
+
         // Fast path first: files that are already local have nothing to wait for.
         // Copy them now and show their completion, so the user sees progress instead
         // of staring at downloads for minutes.
-        let readyNow = discovered.filter { !$0.needsDownload }
-        let needsDL = discovered.filter { $0.needsDownload }
+        let readyNow = remaining.filter { !$0.needsDownload }
+        let needsDL = remaining.filter { $0.needsDownload }
 
         var collectedErrors: [Error] = []
+
+        if !prunable.isEmpty {
+            do {
+                try performPruneBatch(discovered: prunable, srcURL: srcURL, verb: verb, renderer: renderer)
+            } catch {
+                collectedErrors.append(error)
+            }
+        }
 
         if !readyNow.isEmpty {
             do {
@@ -289,6 +317,55 @@ struct FileOperation {
                 needsDownload: Downloader.needsDownload(file)
             )
         }
+    }
+
+    /// Fast metadata check: dst exists as a file, size matches src's logical size, and
+    /// src/dst don't resolve to the same path. No syscalls beyond stat; never downloads.
+    private static func isPrunable(_ d: Discovered, fm: FileManager) -> Bool {
+        if d.src.resolvingSymlinksInPath().path == d.dst.resolvingSymlinksInPath().path {
+            return false
+        }
+        var dstIsDir: ObjCBool = false
+        guard fm.fileExists(atPath: d.dst.path, isDirectory: &dstIsDir), !dstIsDir.boolValue else {
+            return false
+        }
+        let fresh = URL(fileURLWithPath: d.dst.path)
+        guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey]),
+              let dstSize = values.fileSize else {
+            return false
+        }
+        return Int64(dstSize) == d.size
+    }
+
+    private static func performPruneBatch(
+        discovered: [Discovered], srcURL: URL, verb: FileVerb, renderer: OpRenderer
+    ) throws {
+        try renderer.handle(.phaseStart(phase: .operate, totalFiles: discovered.count))
+        var failedCount = 0
+        for d in discovered {
+            do {
+                try performOnePrune(d: d, verb: verb, renderer: renderer)
+            } catch {
+                failedCount += 1
+            }
+        }
+        try renderer.handle(.phaseEnd(phase: .operate))
+        if failedCount > 0 {
+            throw FileOperationError.partialFailure(sourcePath: srcURL.path, failedCount: failedCount)
+        }
+    }
+
+    private static func performOnePrune(
+        d: Discovered, verb: FileVerb, renderer: OpRenderer
+    ) throws {
+        let fm = FileManager.default
+        do {
+            try fm.removeItem(at: d.src)
+        } catch {
+            try renderer.handle(.opFail(verb: verb, src: d.src, dst: d.dst, error: error))
+            throw error
+        }
+        try renderer.handle(.opPruned(verb: verb, src: d.src, dst: d.dst, size: d.size))
     }
 
     /// Per-file loop: for each Discovered, do the single-file op. Used for already-local
