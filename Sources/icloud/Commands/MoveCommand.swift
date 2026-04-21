@@ -33,6 +33,9 @@ struct MoveCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Preview without moving.")
     var dryRun = false
 
+    @Flag(help: "Warn and continue if a source does not exist.")
+    var ignoreMissing = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
@@ -56,12 +59,13 @@ struct MoveCommand: ParsableCommand {
             allowDirectories: true,
             force: force,
             noClobber: noClobber,
+            ignoreMissing: ignoreMissing,
             dryRun: dryRun,
             baselineTimeout: TimeInterval(timeout),
             maxConcurrent: maxConcurrent,
             renderer: renderer
-        ) { fm, src, dest in
-            try fm.moveItem(at: src, to: dest)
+        ) { _, src, dest in
+            try FileOperation.safeMove(from: src, to: dest)
         }
         try renderer.finish()
     }

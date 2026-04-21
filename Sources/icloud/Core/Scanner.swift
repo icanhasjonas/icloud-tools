@@ -15,6 +15,11 @@ struct ScanResult: Sendable {
         var local = 0, cloud = 0, downloading = 0, uploading = 0
         var evictable: Int64 = 0
         for file in files {
+            // Dataless files report .local but have no bytes on disk. Count them as cloud.
+            if file.isDataless {
+                cloud += 1
+                continue
+            }
             switch file.status {
             case .local:
                 local += 1

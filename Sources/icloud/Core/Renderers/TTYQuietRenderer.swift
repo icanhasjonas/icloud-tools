@@ -2,8 +2,10 @@ import Foundation
 
 final class TTYQuietRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
+    private var summary = OpSummary()
 
     func handle(_ event: OpEvent) throws {
+        summary.record(event)
         switch event {
         case .downloadStart(let url, let size):
             print("\(Output.yellow)⇣\(Output.reset) \(rel(url)) \(Output.dim)(\(Output.humanSize(size)))\(Output.reset)")
@@ -19,12 +21,16 @@ final class TTYQuietRenderer: OpRenderer {
             print("\(rel(src)) \(Output.dim)->\(Output.reset) \(rel(dst)) \(Output.yellow)(skipped: \(reason))\(Output.reset)")
         case .opWouldDo(let verb, let src, let dst, _):
             print("\(rel(src)) \(Output.dim)->\(Output.reset) \(rel(dst)) \(Output.dim)(would \(verb.present))\(Output.reset)")
+        case .sourceMissing(let src):
+            FileHandle.standardError.write(Data("\(Output.yellow)⚠\(Output.reset) \(rel(src)) \(Output.yellow)(not found, skipped)\(Output.reset)\n".utf8))
         case .phaseStart, .phaseEnd, .discovered, .downloadTick:
             break
         }
     }
 
-    func finish() throws {}
+    func finish() throws {
+        SummaryFormatter.printTTY(summary)
+    }
 
     private func rel(_ url: URL) -> String {
         PathResolver.relativePath(url, rebase: rebase)

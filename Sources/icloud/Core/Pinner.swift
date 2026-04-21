@@ -110,6 +110,9 @@ struct Pinner {
             let label = dryRun ? "\(Output.dim)\(totalCount) file\(totalCount == 1 ? "" : "s") to \(pinning ? "pin" : "unpin")\(Output.reset)"
                 : "\(Output.green)\(totalCount) file\(totalCount == 1 ? "" : "s") \(verb)\(Output.reset)"
             print("\n\(label)")
+        } else if !json && totalCount == 0 {
+            let reason = tagFilter != nil ? "matched tag filter" : "to \(pinning ? "pin" : "unpin")"
+            print("\(Output.dim)No files \(reason).\(Output.reset)")
         }
     }
 

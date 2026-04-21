@@ -23,14 +23,18 @@ struct Downloader {
     }
 
     static func enumerate(_ url: URL) throws -> [ICloudFile] {
-        let root = try ICloudFile.from(url: url, checkPin: false)
-        if !root.isDirectory {
-            return [root]
-        }
         let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            throw DownloadError.enumerationFailed(url.path)
+        }
+        if !isDir.boolValue {
+            return [try ICloudFile.from(url: url, checkPin: false)]
+        }
+        let walkRoot = url.resolvingSymlinksInPath()
         var enumError: Error?
         guard let enumerator = fm.enumerator(
-            at: url,
+            at: walkRoot,
             includingPropertiesForKeys: Array(ICloudFile.resourceKeys),
             options: [.skipsHiddenFiles],
             errorHandler: { _, error in
@@ -43,8 +47,10 @@ struct Downloader {
         var result: [ICloudFile] = []
         for case let fileURL as URL in enumerator {
             if let err = enumError { throw err }
+            var childIsDir: ObjCBool = false
+            fm.fileExists(atPath: fileURL.path, isDirectory: &childIsDir)
+            if childIsDir.boolValue { continue }
             let child = try ICloudFile.from(url: fileURL, checkPin: false)
-            if child.isDirectory { continue }
             result.append(child)
         }
         if let err = enumError { throw err }
@@ -52,7 +58,7 @@ struct Downloader {
     }
 
     static let defaultMaxConcurrent = 3
-    static let defaultBaselineTimeout: TimeInterval = 120
+    static let defaultBaselineTimeout: TimeInterval = 900
     static let secondsPerMB: Double = 1.2
 
     /// Per-file timeout that scales with file size. ~100 MB => ~2 minutes, ~2 GB => ~40 minutes,

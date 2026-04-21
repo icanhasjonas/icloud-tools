@@ -37,7 +37,8 @@ final class FileOperationTests: XCTestCase {
         FileManager.default.fileExists(atPath: workDir.appendingPathComponent(path).path)
     }
 
-    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false) throws {
+    @discardableResult
+    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false) throws -> SilentRenderer {
         let renderer = SilentRenderer()
         let absolute = paths.map { workDir.appendingPathComponent($0).path }
         try FileOperation.execute(
@@ -46,10 +47,12 @@ final class FileOperationTests: XCTestCase {
             allowDirectories: true,
             force: force,
             noClobber: noClobber,
+            ignoreMissing: ignoreMissing,
             renderer: renderer
         ) { fm, src, dst in
             try fm.moveItem(at: src, to: dst)
         }
+        return renderer
     }
 
     // MARK: - tests
@@ -129,6 +132,136 @@ final class FileOperationTests: XCTestCase {
         XCTAssertEqual(read("dst/y.txt"), "two")
     }
 
+    func testMissingSourceThrowsByDefault() throws {
+        try write("one", to: "a.txt")
+        try FileManager.default.createDirectory(at: workDir.appendingPathComponent("dst"), withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try runMove(["a.txt", "nope.txt", "dst/"])) { error in
+            if case .sourceNotFound = error as? FileOperationError { return }
+            XCTFail("expected sourceNotFound, got \(error)")
+        }
+    }
+
+    func testIgnoreMissingWarnsAndContinues() throws {
+        try write("one", to: "a.txt")
+        try write("two", to: "b.txt")
+        try write("three", to: "c.txt")
+        try FileManager.default.createDirectory(at: workDir.appendingPathComponent("dst"), withIntermediateDirectories: true)
+
+        let renderer = try runMove(["a.txt", "b.txt", "nope.txt", "c.txt", "dst/"], ignoreMissing: true)
+
+        XCTAssertEqual(read("dst/a.txt"), "one", "a should be moved")
+        XCTAssertEqual(read("dst/b.txt"), "two", "b should be moved")
+        XCTAssertEqual(read("dst/c.txt"), "three", "c should be moved AFTER the missing one")
+        XCTAssertFalse(exists("dst/nope.txt"), "missing source must not produce a destination")
+        XCTAssertEqual(renderer.missing.count, 1, "expected exactly one sourceMissing event")
+        XCTAssertEqual(renderer.missing.first?.lastPathComponent, "nope.txt")
+    }
+
+    func testPartialFailureErrorIncludesCount() throws {
+        try write("a", to: "src/a.txt")
+        try write("b", to: "src/b.txt")
+        try write("c", to: "src/c.txt")
+        try FileManager.default.createDirectory(at: workDir.appendingPathComponent("dst"), withIntermediateDirectories: true)
+
+        enum FakeOp: Error { case simulated }
+        let renderer = SilentRenderer()
+        let srcPath = workDir.appendingPathComponent("src").path
+        let dstPath = workDir.appendingPathComponent("dst/").path
+
+        var caught: Error?
+        do {
+            try FileOperation.execute(
+                paths: [srcPath, dstPath],
+                verb: .move,
+                allowDirectories: true,
+                force: false, noClobber: false,
+                renderer: renderer
+            ) { _, _, _ in
+                throw FakeOp.simulated
+            }
+        } catch {
+            caught = error
+        }
+
+        guard let err = caught as? FileOperationError,
+              case .partialFailure(_, let n) = err else {
+            XCTFail("expected partialFailure, got \(String(describing: caught))")
+            return
+        }
+        XCTAssertEqual(n, 3, "all 3 files failed")
+        XCTAssertTrue(err.localizedDescription.contains("3"), "error message must include the count: \(err.localizedDescription)")
+    }
+
+    func testFailedOperationCleansUpCreatedParentDirs() throws {
+        try write("hello", to: "src.txt")
+        // `dst/deep/nested/out.txt` -- none of dst, dst/deep, dst/deep/nested exists yet.
+        enum FakeOp: Error { case simulated }
+        let renderer = SilentRenderer()
+        let srcPath = workDir.appendingPathComponent("src.txt").path
+        let dstPath = workDir.appendingPathComponent("dst/deep/nested/out.txt").path
+
+        XCTAssertThrowsError(try FileOperation.execute(
+            paths: [srcPath, dstPath],
+            verb: .move,
+            allowDirectories: true,
+            force: false, noClobber: false,
+            renderer: renderer
+        ) { _, _, _ in
+            throw FakeOp.simulated
+        })
+
+        XCTAssertFalse(exists("dst/deep/nested"), "innermost created dir must be cleaned up")
+        XCTAssertFalse(exists("dst/deep"), "middle created dir must be cleaned up")
+        XCTAssertFalse(exists("dst"), "outermost created dir must be cleaned up")
+        XCTAssertTrue(exists("src.txt"), "source file must survive a failed op")
+    }
+
+    func testCleanupStopsAtPreExistingDir() throws {
+        // Pre-create dst/. Op fails. dst/ must survive. dst/deep (created by us) must not.
+        try FileManager.default.createDirectory(at: workDir.appendingPathComponent("dst"), withIntermediateDirectories: true)
+        try write("hello", to: "src.txt")
+        enum FakeOp: Error { case simulated }
+        let renderer = SilentRenderer()
+        let srcPath = workDir.appendingPathComponent("src.txt").path
+        let dstPath = workDir.appendingPathComponent("dst/deep/out.txt").path
+
+        XCTAssertThrowsError(try FileOperation.execute(
+            paths: [srcPath, dstPath],
+            verb: .move,
+            allowDirectories: true,
+            force: false, noClobber: false,
+            renderer: renderer
+        ) { _, _, _ in
+            throw FakeOp.simulated
+        })
+
+        XCTAssertFalse(exists("dst/deep"), "created subdir must be cleaned up")
+        XCTAssertTrue(exists("dst"), "pre-existing dir must NOT be removed")
+    }
+
+    func testCleanupDoesNotTouchNonEmptyDirs() throws {
+        // Pre-populate dst/deep with an unrelated file. Op fails. dst/deep must survive.
+        try write("survivor", to: "dst/deep/unrelated.txt")
+        try write("hello", to: "src.txt")
+        enum FakeOp: Error { case simulated }
+        let renderer = SilentRenderer()
+        let srcPath = workDir.appendingPathComponent("src.txt").path
+        let dstPath = workDir.appendingPathComponent("dst/deep/out.txt").path
+
+        XCTAssertThrowsError(try FileOperation.execute(
+            paths: [srcPath, dstPath],
+            verb: .move,
+            allowDirectories: true,
+            force: false, noClobber: false,
+            renderer: renderer
+        ) { _, _, _ in
+            throw FakeOp.simulated
+        })
+
+        XCTAssertTrue(exists("dst/deep/unrelated.txt"), "non-empty dir must NOT be removed")
+    }
+
     func testForceConflictWithBackupCleanedUp() throws {
         try write("NEW", to: "x.txt")
         try write("OLD", to: "dst/x.txt")
@@ -145,9 +278,12 @@ final class FileOperationTests: XCTestCase {
     }
 }
 
-/// Renderer that swallows all events. For tests that only care about filesystem outcomes.
+/// Renderer that swallows output but records events for assertion.
 private final class SilentRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
-    func handle(_ event: OpEvent) throws {}
+    private(set) var missing: [URL] = []
+    func handle(_ event: OpEvent) throws {
+        if case .sourceMissing(let src) = event { missing.append(src) }
+    }
     func finish() throws {}
 }

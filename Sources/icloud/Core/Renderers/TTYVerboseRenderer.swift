@@ -3,8 +3,10 @@ import Foundation
 final class TTYVerboseRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
     private var lastHeader: String?
+    private var summary = OpSummary()
 
     func handle(_ event: OpEvent) throws {
+        summary.record(event)
         switch event {
         case .downloadStart(let url, let size):
             header(for: url)
@@ -19,21 +21,26 @@ final class TTYVerboseRenderer: OpRenderer {
         case .opDone(let verb, let src, let dst, _):
             header(for: src)
             print("  \(Output.green)\(verb.past) to\(Output.reset) \(rel(dst))")
-        case .opFail(let verb, let src, _, let error):
+        case .opFail(let verb, let src, let dst, let error):
             header(for: src)
-            print("  \(Output.red)\(verb.past) failed:\(Output.reset) \(error.localizedDescription)")
-        case .opSkipped(_, let src, _, let reason, _):
+            print("  \(Output.red)\(verb.past) failed:\(Output.reset) \(rel(dst)) \(Output.dim)-\(Output.reset) \(error.localizedDescription)")
+        case .opSkipped(_, let src, let dst, let reason, _):
             header(for: src)
-            print("  \(Output.yellow)skipped:\(Output.reset) \(reason)")
+            print("  \(Output.yellow)skipped:\(Output.reset) \(rel(dst)) \(Output.dim)(\(reason))\(Output.reset)")
         case .opWouldDo(let verb, let src, let dst, _):
             header(for: src)
             print("  \(Output.dim)would \(verb.present) to\(Output.reset) \(rel(dst))")
+        case .sourceMissing(let src):
+            header(for: src)
+            FileHandle.standardError.write(Data("  \(Output.yellow)not found\(Output.reset) \(Output.dim)(skipped)\(Output.reset)\n".utf8))
         case .phaseStart, .phaseEnd, .discovered, .downloadTick:
             break
         }
     }
 
-    func finish() throws {}
+    func finish() throws {
+        SummaryFormatter.printTTY(summary)
+    }
 
     private func rel(_ url: URL) -> String {
         PathResolver.relativePath(url, rebase: rebase)

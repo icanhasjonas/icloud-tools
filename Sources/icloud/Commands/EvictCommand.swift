@@ -43,6 +43,7 @@ struct EvictCommand: ParsableCommand {
         let fm = FileManager.default
         var totalFiles = 0
         var totalFreed: Int64 = 0
+        var failedCount = 0
 
         for path in paths {
             let url = PathResolver.resolve(path)
@@ -101,7 +102,20 @@ struct EvictCommand: ParsableCommand {
                         print("  \(Output.dim)would evict\(Output.reset) \(display) \(Output.dim)(\(size))\(Output.reset)")
                     }
                 } else {
-                    try fm.evictUbiquitousItem(at: file.url)
+                    do {
+                        try fm.evictUbiquitousItem(at: file.url)
+                    } catch {
+                        failedCount += 1
+                        if json {
+                            try Output.printJSONLine(EvictResult(
+                                path: file.url.path, name: file.name,
+                                freed: 0, status: "failed",
+                                error: error.localizedDescription))
+                        } else {
+                            print("  \(Output.red)failed\(Output.reset) \(display): \(error.localizedDescription)")
+                        }
+                        continue
+                    }
                     if json {
                         try Output.printJSONLine(EvictResult(
                             path: file.url.path, name: file.name,
@@ -119,6 +133,23 @@ struct EvictCommand: ParsableCommand {
             print("\n\(Output.green)\(totalFiles) file\(totalFiles == 1 ? "" : "s") evicted\(Output.reset) \(Output.dim)(freed \(Output.humanSize(totalFreed)))\(Output.reset)")
         } else if !json && dryRun && totalFiles > 0 {
             print("\n\(Output.dim)\(totalFiles) file\(totalFiles == 1 ? "" : "s") to evict (would free \(Output.humanSize(totalFreed)))\(Output.reset)")
+        } else if !json && totalFiles == 0 && failedCount == 0 {
+            print("\(Output.dim)Nothing to evict.\(Output.reset)")
+        }
+
+        if failedCount > 0 {
+            throw EvictError.partialFailure(count: failedCount)
+        }
+    }
+}
+
+enum EvictError: LocalizedError {
+    case partialFailure(count: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .partialFailure(let n):
+            return "\(n) file\(n == 1 ? "" : "s") failed to evict (see above)."
         }
     }
 }
@@ -128,4 +159,5 @@ struct EvictResult: Encodable {
     let name: String
     let freed: Int64
     let status: String
+    var error: String? = nil
 }

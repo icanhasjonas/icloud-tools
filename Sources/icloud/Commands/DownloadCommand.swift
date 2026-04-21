@@ -78,10 +78,19 @@ struct DownloadCommand: ParsableCommand {
                     print("\(display) \(Output.dim)(\(size))\(Output.reset) \(Output.dim)would download\(Output.reset)")
                 }
             }
-            if !json && !pending.isEmpty {
-                let total = pending.reduce(Int64(0)) { $0 + $1.fileSize }
-                print("\n\(Output.dim)\(pending.count) file\(pending.count == 1 ? "" : "s") to download (\(Output.humanSize(total)))\(Output.reset)")
+            if !json {
+                if pending.isEmpty {
+                    print("\(Output.dim)Nothing to download.\(Output.reset)")
+                } else {
+                    let total = pending.reduce(Int64(0)) { $0 + $1.fileSize }
+                    print("\n\(Output.dim)\(pending.count) file\(pending.count == 1 ? "" : "s") to download (\(Output.humanSize(total)))\(Output.reset)")
+                }
             }
+            return
+        }
+
+        if !json && pending.isEmpty {
+            print("\(Output.dim)Nothing to download.\(Output.reset)")
             return
         }
 

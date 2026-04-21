@@ -2,8 +2,10 @@ import Foundation
 
 final class LineStreamRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
+    private var summary = OpSummary()
 
     func handle(_ event: OpEvent) throws {
+        summary.record(event)
         switch event {
         case .downloadStart(let url, _):
             print("DL-> \(url.path)")
@@ -23,10 +25,14 @@ final class LineStreamRenderer: OpRenderer {
         case .opWouldDo(let verb, let src, let dst, _):
             let tag = verb == .move ? "MV" : "CP"
             print("\(tag)?  \(src.path) -> \(dst.path) (would \(verb.present))")
+        case .sourceMissing(let src):
+            FileHandle.standardError.write(Data("WARN \(src.path): not found (skipped)\n".utf8))
         case .phaseStart, .phaseEnd, .discovered, .downloadTick:
             break
         }
     }
 
-    func finish() throws {}
+    func finish() throws {
+        SummaryFormatter.printLineStream(summary)
+    }
 }

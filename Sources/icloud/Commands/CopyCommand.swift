@@ -37,6 +37,9 @@ struct CopyCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Preview without copying.")
     var dryRun = false
 
+    @Flag(help: "Warn and continue if a source does not exist.")
+    var ignoreMissing = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
@@ -60,12 +63,13 @@ struct CopyCommand: ParsableCommand {
             allowDirectories: recursive,
             force: force,
             noClobber: noClobber,
+            ignoreMissing: ignoreMissing,
             dryRun: dryRun,
             baselineTimeout: TimeInterval(timeout),
             maxConcurrent: maxConcurrent,
             renderer: renderer
-        ) { fm, src, dest in
-            try fm.copyItem(at: src, to: dest)
+        ) { _, src, dest in
+            try FileOperation.safeCopy(from: src, to: dest)
         }
         try renderer.finish()
     }
