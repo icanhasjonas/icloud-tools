@@ -8,6 +8,9 @@ enum SummaryFormatter {
         var rows: [(Int, String, String)] = []
         if s.copied > 0 { rows.append((s.copied, "copied", Output.green)) }
         if s.moved > 0 { rows.append((s.moved, "moved", Output.green)) }
+        if s.updated > 0 {
+            rows.append((s.updated, "updated (\(Output.humanSize(s.updatedBytes)))", Output.green))
+        }
         if s.pruned > 0 {
             rows.append((s.pruned, "pruned (\(Output.humanSize(s.prunedBytes)) freed)", Output.cyan))
         }
@@ -34,6 +37,7 @@ enum SummaryFormatter {
         var parts: [String] = []
         if s.copied > 0 { parts.append("copied=\(s.copied)") }
         if s.moved > 0 { parts.append("moved=\(s.moved)") }
+        if s.updated > 0 { parts.append("updated=\(s.updated)") }
         if s.pruned > 0 { parts.append("pruned=\(s.pruned)") }
         if s.skipped > 0 { parts.append("skipped=\(s.skipped)") }
         if s.failed > 0 { parts.append("failed=\(s.failed)") }

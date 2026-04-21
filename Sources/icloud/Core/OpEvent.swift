@@ -41,6 +41,7 @@ enum OpEvent {
     case opFail(verb: FileVerb, src: URL, dst: URL, error: Error)
     case opSkipped(verb: FileVerb, src: URL, dst: URL, reason: String, size: Int64)
     case opPruned(verb: FileVerb, src: URL, dst: URL, size: Int64)
+    case opUpdated(verb: FileVerb, src: URL, dst: URL, size: Int64)
     case opWouldDo(verb: FileVerb, src: URL, dst: URL, size: Int64)
 
     case sourceMissing(src: URL)
@@ -49,6 +50,8 @@ enum OpEvent {
 struct OpSummary {
     var copied = 0
     var moved = 0
+    var updated = 0
+    var updatedBytes: Int64 = 0
     var skipped = 0
     var pruned = 0
     var prunedBytes: Int64 = 0
@@ -77,6 +80,10 @@ struct OpSummary {
             verb = v
             pruned += 1
             prunedBytes += size
+        case .opUpdated(let v, _, _, let size):
+            verb = v
+            updated += 1
+            updatedBytes += size
         case .opWouldDo(let v, _, _, _):
             verb = v
             wouldDo += 1
@@ -90,6 +97,6 @@ struct OpSummary {
         }
     }
 
-    var totalOps: Int { copied + moved + skipped + pruned + failed + notFound + wouldDo }
+    var totalOps: Int { copied + moved + updated + skipped + pruned + failed + notFound + wouldDo }
     var isEmpty: Bool { totalOps == 0 && timedOut == 0 }
 }

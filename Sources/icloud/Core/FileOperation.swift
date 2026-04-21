@@ -17,6 +17,7 @@ struct FileOperation {
         noClobber: Bool,
         ignoreMissing: Bool = false,
         pruneSource: Bool = false,
+        updateIfMismatch: Bool = false,
         dryRun: Bool = false,
         baselineTimeout: TimeInterval = Downloader.defaultBaselineTimeout,
         maxConcurrent: Int = Downloader.defaultMaxConcurrent,
@@ -60,6 +61,7 @@ struct FileOperation {
                 source: source, verb: verb, allowDirectories: allowDirectories,
                 force: force, noClobber: noClobber,
                 ignoreMissing: ignoreMissing, pruneSource: pruneSource,
+                updateIfMismatch: updateIfMismatch,
                 dryRun: dryRun,
                 baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
                 destURL: destURL, destExists: destExists, destIsDir: destIsDir.boolValue,
@@ -71,7 +73,8 @@ struct FileOperation {
     private static func processSource(
         source: String, verb: FileVerb, allowDirectories: Bool,
         force: Bool, noClobber: Bool,
-        ignoreMissing: Bool, pruneSource: Bool, dryRun: Bool,
+        ignoreMissing: Bool, pruneSource: Bool,
+        updateIfMismatch: Bool, dryRun: Bool,
         baselineTimeout: TimeInterval, maxConcurrent: Int,
         destURL: URL, destExists: Bool, destIsDir: Bool,
         renderer: OpRenderer,
@@ -127,29 +130,31 @@ struct FileOperation {
             return
         }
 
-        // --prune-source: filter files whose destination already exists with the same
-        // logical size. These are handled by a fast unlink -- never downloaded, never
-        // copied. The remaining files flow through the normal ready/needs-download
-        // split below.
-        var remaining = discovered
-        var prunable: [Discovered] = []
-        if pruneSource {
-            var rest: [Discovered] = []
+        // Classify each discovered file by dst state so we can route match/mismatch
+        // branches independently. --prune-source handles match-side; --update-if-mismatch
+        // handles mismatch-side; a run can compose both.
+        var prunable: [Discovered] = []       // match + --prune-source -> unlink src
+        var matchSkip: [Discovered] = []      // match + --update-if-mismatch (no prune) -> skip, both preserved
+        var toUpdate: [Discovered] = []       // mismatch + --update-if-mismatch -> force overwrite (unlink src on mv)
+        var normal: [Discovered] = []         // everything else -> existing flow
+
+        if pruneSource || updateIfMismatch {
             for d in discovered {
-                if isPrunable(d, fm: fm) {
-                    prunable.append(d)
-                } else {
-                    rest.append(d)
+                switch classifyDst(d, fm: fm) {
+                case .matchesSize:
+                    if pruneSource { prunable.append(d) }
+                    else if updateIfMismatch { matchSkip.append(d) }
+                    else { normal.append(d) }
+                case .mismatchesSize:
+                    if updateIfMismatch { toUpdate.append(d) }
+                    else { normal.append(d) }
+                case .other:
+                    normal.append(d)
                 }
             }
-            remaining = rest
+        } else {
+            normal = discovered
         }
-
-        // Fast path first: files that are already local have nothing to wait for.
-        // Copy them now and show their completion, so the user sees progress instead
-        // of staring at downloads for minutes.
-        let readyNow = remaining.filter { !$0.needsDownload }
-        let needsDL = remaining.filter { $0.needsDownload }
 
         var collectedErrors: [Error] = []
 
@@ -161,11 +166,17 @@ struct FileOperation {
             }
         }
 
-        if !readyNow.isEmpty {
+        for d in matchSkip {
+            try renderer.handle(.opSkipped(verb: verb, src: d.src, dst: d.dst, reason: "size matches", size: d.size))
+        }
+
+        // Update batch: force overwrite on mismatch, downloads source if needed.
+        if !toUpdate.isEmpty {
             do {
-                try performFiles(
-                    discovered: readyNow, srcURL: srcURL, verb: verb,
-                    force: force, noClobber: noClobber,
+                try runBatch(
+                    toUpdate, srcURL: srcURL, verb: verb,
+                    force: true, noClobber: false, isUpdate: true,
+                    baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
                     renderer: renderer, operation: operation
                 )
             } catch {
@@ -173,11 +184,12 @@ struct FileOperation {
             }
         }
 
-        if !needsDL.isEmpty {
+        // Normal batch: whatever the user's original flags said.
+        if !normal.isEmpty {
             do {
-                try interleaveDownloadAndCopy(
-                    pending: needsDL, srcURL: srcURL, verb: verb,
-                    force: force, noClobber: noClobber,
+                try runBatch(
+                    normal, srcURL: srcURL, verb: verb,
+                    force: force, noClobber: noClobber, isUpdate: false,
                     baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
                     renderer: renderer, operation: operation
                 )
@@ -189,13 +201,51 @@ struct FileOperation {
         if let first = collectedErrors.first { throw first }
     }
 
+    /// Ready-vs-needs-download split + dispatch. Extracted so --update-if-mismatch
+    /// and the normal flow can both go through it with different force/isUpdate settings.
+    private static func runBatch(
+        _ pending: [Discovered], srcURL: URL, verb: FileVerb,
+        force: Bool, noClobber: Bool, isUpdate: Bool,
+        baselineTimeout: TimeInterval, maxConcurrent: Int,
+        renderer: OpRenderer, operation: (FileManager, URL, URL) throws -> Void
+    ) throws {
+        let readyNow = pending.filter { !$0.needsDownload }
+        let needsDL = pending.filter { $0.needsDownload }
+
+        var collectedErrors: [Error] = []
+        if !readyNow.isEmpty {
+            do {
+                try performFiles(
+                    discovered: readyNow, srcURL: srcURL, verb: verb,
+                    force: force, noClobber: noClobber, isUpdate: isUpdate,
+                    renderer: renderer, operation: operation
+                )
+            } catch {
+                collectedErrors.append(error)
+            }
+        }
+        if !needsDL.isEmpty {
+            do {
+                try interleaveDownloadAndCopy(
+                    pending: needsDL, srcURL: srcURL, verb: verb,
+                    force: force, noClobber: noClobber, isUpdate: isUpdate,
+                    baselineTimeout: baselineTimeout, maxConcurrent: maxConcurrent,
+                    renderer: renderer, operation: operation
+                )
+            } catch {
+                collectedErrors.append(error)
+            }
+        }
+        if let first = collectedErrors.first { throw first }
+    }
+
     /// Download + copy interleaved: up to `maxConcurrent` downloads in flight at once; as
     /// each file's download completes (or times out), IMMEDIATELY run the per-file copy
     /// and emit opDone/opFail for that one file. User sees per-file completion without
     /// waiting for the entire download phase.
     private static func interleaveDownloadAndCopy(
         pending: [Discovered], srcURL: URL, verb: FileVerb,
-        force: Bool, noClobber: Bool,
+        force: Bool, noClobber: Bool, isUpdate: Bool = false,
         baselineTimeout: TimeInterval, maxConcurrent: Int,
         renderer: OpRenderer, operation: (FileManager, URL, URL) throws -> Void
     ) throws {
@@ -251,6 +301,7 @@ struct FileOperation {
                         try performOneFile(
                             d: entry.d, verb: verb,
                             force: force, noClobber: noClobber,
+                            isUpdate: isUpdate,
                             renderer: renderer, operation: operation
                         )
                     } catch {
@@ -319,22 +370,29 @@ struct FileOperation {
         }
     }
 
-    /// Fast metadata check: dst exists as a file, size matches src's logical size, and
-    /// src/dst don't resolve to the same path. No syscalls beyond stat; never downloads.
-    private static func isPrunable(_ d: Discovered, fm: FileManager) -> Bool {
+    private enum DstClassification {
+        case matchesSize       // dst is a regular file with the same logical size as src
+        case mismatchesSize    // dst is a regular file with different size
+        case other             // absent, directory, inaccessible, or same path as src
+    }
+
+    /// Metadata-only classification. No bytes read, no downloads triggered. Same-path
+    /// guard is critical: matching src to itself would delete the user's only copy
+    /// in both prune and update paths.
+    private static func classifyDst(_ d: Discovered, fm: FileManager) -> DstClassification {
         if d.src.resolvingSymlinksInPath().path == d.dst.resolvingSymlinksInPath().path {
-            return false
+            return .other
         }
         var dstIsDir: ObjCBool = false
         guard fm.fileExists(atPath: d.dst.path, isDirectory: &dstIsDir), !dstIsDir.boolValue else {
-            return false
+            return .other
         }
         let fresh = URL(fileURLWithPath: d.dst.path)
         guard let values = try? fresh.resourceValues(forKeys: [.fileSizeKey]),
               let dstSize = values.fileSize else {
-            return false
+            return .other
         }
-        return Int64(dstSize) == d.size
+        return Int64(dstSize) == d.size ? .matchesSize : .mismatchesSize
     }
 
     private static func performPruneBatch(
@@ -373,7 +431,7 @@ struct FileOperation {
     /// download+copy path in `processSource`.
     private static func performFiles(
         discovered: [Discovered], srcURL: URL, verb: FileVerb,
-        force: Bool, noClobber: Bool,
+        force: Bool, noClobber: Bool, isUpdate: Bool = false,
         renderer: OpRenderer, operation: (FileManager, URL, URL) throws -> Void
     ) throws {
         try renderer.handle(.phaseStart(phase: .operate, totalFiles: discovered.count))
@@ -381,6 +439,7 @@ struct FileOperation {
         for d in discovered {
             do {
                 try performOneFile(d: d, verb: verb, force: force, noClobber: noClobber,
+                                   isUpdate: isUpdate,
                                    renderer: renderer, operation: operation)
             } catch {
                 failedCount += 1
@@ -398,7 +457,7 @@ struct FileOperation {
     /// so we don't leave behind a skeleton of empty dirs.
     fileprivate static func performOneFile(
         d: Discovered, verb: FileVerb,
-        force: Bool, noClobber: Bool,
+        force: Bool, noClobber: Bool, isUpdate: Bool = false,
         renderer: OpRenderer, operation: (FileManager, URL, URL) throws -> Void
     ) throws {
         let fm = FileManager.default
@@ -457,7 +516,11 @@ struct FileOperation {
             throw verifyErr
         }
         success = true
-        try renderer.handle(.opDone(verb: verb, src: d.src, dst: d.dst, size: d.size))
+        if isUpdate {
+            try renderer.handle(.opUpdated(verb: verb, src: d.src, dst: d.dst, size: d.size))
+        } else {
+            try renderer.handle(.opDone(verb: verb, src: d.src, dst: d.dst, size: d.size))
+        }
     }
 
     /// Walks up from `dir` collecting ancestors that don't exist. Innermost first,

@@ -39,6 +39,9 @@ struct MoveCommand: ParsableCommand {
     @Flag(help: "With -n: if dst exists and file sizes match, delete source instead of skipping. Never downloads.")
     var pruneSource = false
 
+    @Flag(help: "With -n or -f: on size mismatch, overwrite dst (downloads source if needed). Match-case still follows the other flags.")
+    var updateIfMismatch = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
@@ -55,6 +58,9 @@ struct MoveCommand: ParsableCommand {
         if pruneSource && !noClobber {
             throw ValidationError("--prune-source requires --no-clobber (-n).")
         }
+        if updateIfMismatch && !noClobber && !force {
+            throw ValidationError("--update-if-mismatch requires --no-clobber (-n) or --force (-f).")
+        }
     }
 
     func run() throws {
@@ -67,6 +73,7 @@ struct MoveCommand: ParsableCommand {
             noClobber: noClobber,
             ignoreMissing: ignoreMissing,
             pruneSource: pruneSource,
+            updateIfMismatch: updateIfMismatch,
             dryRun: dryRun,
             baselineTimeout: TimeInterval(timeout),
             maxConcurrent: maxConcurrent,

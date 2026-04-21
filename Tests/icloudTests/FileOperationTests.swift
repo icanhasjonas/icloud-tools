@@ -38,7 +38,7 @@ final class FileOperationTests: XCTestCase {
     }
 
     @discardableResult
-    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false, pruneSource: Bool = false) throws -> SilentRenderer {
+    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false, pruneSource: Bool = false, updateIfMismatch: Bool = false) throws -> SilentRenderer {
         let renderer = SilentRenderer()
         let absolute = paths.map { workDir.appendingPathComponent($0).path }
         try FileOperation.execute(
@@ -49,6 +49,7 @@ final class FileOperationTests: XCTestCase {
             noClobber: noClobber,
             ignoreMissing: ignoreMissing,
             pruneSource: pruneSource,
+            updateIfMismatch: updateIfMismatch,
             renderer: renderer
         ) { fm, src, dst in
             try fm.moveItem(at: src, to: dst)
@@ -346,6 +347,84 @@ final class FileOperationTests: XCTestCase {
         XCTAssertEqual(renderer.skipped.count, 1)
     }
 
+    // MARK: - --update-if-mismatch
+
+    func testUpdateIfMismatchWithNoClobberOverwritesOnMismatch() throws {
+        try write("NEW CONTENT HERE", to: "a.txt")   // 16 bytes
+        try write("old", to: "dst/a.txt")              // 3 bytes  -- mismatch
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, updateIfMismatch: true)
+
+        XCTAssertFalse(exists("a.txt"), "source moved out (mv semantics)")
+        XCTAssertEqual(read("dst/a.txt"), "NEW CONTENT HERE", "dst overwritten with src bytes")
+        XCTAssertEqual(renderer.updated.count, 1, "opUpdated emitted on mismatch")
+        XCTAssertEqual(renderer.skipped.count, 0)
+    }
+
+    func testUpdateIfMismatchWithNoClobberSkipsOnMatch() throws {
+        try write("same", to: "a.txt")
+        try write("same", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, updateIfMismatch: true)
+
+        XCTAssertTrue(exists("a.txt"), "source preserved on match (not pruned without --prune-source)")
+        XCTAssertEqual(read("dst/a.txt"), "same", "dst untouched")
+        XCTAssertEqual(renderer.updated.count, 0)
+        XCTAssertEqual(renderer.skipped.count, 1)
+        XCTAssertEqual(renderer.skipped.first?.1, "size matches")
+    }
+
+    func testUpdateIfMismatchWithForceSkipsOnMatch() throws {
+        // -f --update: match should skip (byte-saving optimization over plain -f).
+        try write("same", to: "a.txt")
+        try write("same", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], force: true, updateIfMismatch: true)
+
+        XCTAssertTrue(exists("a.txt"), "source preserved on match even with -f")
+        XCTAssertEqual(renderer.updated.count, 0)
+        XCTAssertEqual(renderer.skipped.count, 1, "saved bytes: skipped instead of wasteful overwrite")
+    }
+
+    func testUpdateIfMismatchWithForceOverwritesOnMismatch() throws {
+        try write("NEW", to: "a.txt")
+        try write("OLD CONTENT", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], force: true, updateIfMismatch: true)
+
+        XCTAssertFalse(exists("a.txt"))
+        XCTAssertEqual(read("dst/a.txt"), "NEW")
+        XCTAssertEqual(renderer.updated.count, 1)
+    }
+
+    func testPruneAndUpdateCombined() throws {
+        // The full 3-way sync: match -> prune, mismatch -> update, absent -> move.
+        try write("same", to: "a.txt")
+        try write("same", to: "dst/a.txt")             // match -> prune
+
+        try write("NEW BYTES HERE", to: "b.txt")
+        try write("old", to: "dst/b.txt")               // mismatch -> update
+
+        try write("fresh", to: "c.txt")                 // absent -> move
+
+        let renderer = try runMove(
+            ["a.txt", "b.txt", "c.txt", "dst/"],
+            noClobber: true, pruneSource: true, updateIfMismatch: true
+        )
+
+        XCTAssertFalse(exists("a.txt"), "prune unlinked src")
+        XCTAssertFalse(exists("b.txt"), "update+mv unlinked src")
+        XCTAssertFalse(exists("c.txt"), "mv moved src")
+
+        XCTAssertEqual(read("dst/a.txt"), "same", "pruned dst untouched")
+        XCTAssertEqual(read("dst/b.txt"), "NEW BYTES HERE", "updated dst got src bytes")
+        XCTAssertEqual(read("dst/c.txt"), "fresh", "moved dst populated")
+
+        XCTAssertEqual(renderer.pruned.count, 1)
+        XCTAssertEqual(renderer.updated.count, 1)
+        XCTAssertEqual(renderer.skipped.count, 0)
+    }
+
     func testForceConflictWithBackupCleanedUp() throws {
         try write("NEW", to: "x.txt")
         try write("OLD", to: "dst/x.txt")
@@ -367,11 +446,13 @@ private final class SilentRenderer: OpRenderer {
     var rebase: PathResolver.Rebase?
     private(set) var missing: [URL] = []
     private(set) var pruned: [URL] = []
+    private(set) var updated: [URL] = []
     private(set) var skipped: [(URL, String)] = []
     func handle(_ event: OpEvent) throws {
         switch event {
         case .sourceMissing(let src): missing.append(src)
         case .opPruned(_, let src, _, _): pruned.append(src)
+        case .opUpdated(_, let src, _, _): updated.append(src)
         case .opSkipped(_, let src, _, let reason, _): skipped.append((src, reason))
         default: break
         }

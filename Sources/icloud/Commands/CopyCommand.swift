@@ -40,6 +40,9 @@ struct CopyCommand: ParsableCommand {
     @Flag(help: "Warn and continue if a source does not exist.")
     var ignoreMissing = false
 
+    @Flag(help: "With -n or -f: on size mismatch, overwrite dst (downloads source if needed). Match-case still follows the other flags.")
+    var updateIfMismatch = false
+
     @Flag(help: "NDJSON output.")
     var json = false
 
@@ -53,6 +56,9 @@ struct CopyCommand: ParsableCommand {
         guard paths.count >= 2 else {
             throw ValidationError("Usage: icloud cp [-rfnvd] source... dest")
         }
+        if updateIfMismatch && !noClobber && !force {
+            throw ValidationError("--update-if-mismatch requires --no-clobber (-n) or --force (-f).")
+        }
     }
 
     func run() throws {
@@ -64,6 +70,7 @@ struct CopyCommand: ParsableCommand {
             force: force,
             noClobber: noClobber,
             ignoreMissing: ignoreMissing,
+            updateIfMismatch: updateIfMismatch,
             dryRun: dryRun,
             baselineTimeout: TimeInterval(timeout),
             maxConcurrent: maxConcurrent,

@@ -30,6 +30,9 @@ final class TTYVerboseRenderer: OpRenderer {
         case .opPruned(_, let src, _, let size):
             header(for: src)
             print("  \(Output.cyan)pruned\(Output.reset) \(Output.dim)(dst matches, \(Output.humanSize(size)) freed)\(Output.reset)")
+        case .opUpdated(let verb, let src, let dst, let size):
+            header(for: src)
+            print("  \(Output.green)updated \(verb.past) to\(Output.reset) \(rel(dst)) \(Output.dim)(\(Output.humanSize(size)))\(Output.reset)")
         case .opWouldDo(let verb, let src, let dst, _):
             header(for: src)
             print("  \(Output.dim)would \(verb.present) to\(Output.reset) \(rel(dst))")

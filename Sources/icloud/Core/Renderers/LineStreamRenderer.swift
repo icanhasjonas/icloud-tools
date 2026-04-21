@@ -24,6 +24,9 @@ final class LineStreamRenderer: OpRenderer {
             print("\(tag)?  \(src.path) -> \(dst.path) (skipped: \(reason))")
         case .opPruned(_, let src, let dst, _):
             print("MV~  \(src.path) ~> \(dst.path) (pruned: size match)")
+        case .opUpdated(let verb, let src, let dst, _):
+            let tag = verb == .move ? "MV" : "CP"
+            print("\(tag)!  \(src.path) => \(dst.path) (updated: size mismatch)")
         case .opWouldDo(let verb, let src, let dst, _):
             let tag = verb == .move ? "MV" : "CP"
             print("\(tag)?  \(src.path) -> \(dst.path) (would \(verb.present))")
