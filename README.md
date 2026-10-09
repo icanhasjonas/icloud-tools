@@ -21,6 +21,10 @@ brew tap icanhasjonas/tap
 brew install icloud-tools
 ```
 
+Installs a prebuilt universal binary (Apple Silicon + Intel) with bash/zsh/fish completions. No Xcode needed.
+
+Conflicts with Homebrew's `icloudpd`, which also installs a binary named `icloud`. Run `brew unlink icloudpd` first if you have it.
+
 ### From source
 
 ```bash
@@ -192,7 +196,7 @@ These are why the tool exists in its current shape:
 3. **Never swallow syscall errors on the data path.** `setxattr`, `moveItem`, `copyItem`, enumeration, all check their returns.
 4. **Download waits for all dataless states.** Not just `.cloud` — `.downloading` and dataless `.local` too.
 
-30 unit tests pin these covenants. Run with `swift test`.
+50 unit tests pin these covenants. Run with `swift test`.
 
 ## Limitations
 
