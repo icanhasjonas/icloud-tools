@@ -41,7 +41,8 @@ echo "let version = \"${VERSION}\"" > "$VERSION_FILE"
 step "build universal (arm64 + x86_64)"
 swift build -c release --arch arm64 --arch x86_64
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/icloud"
-lipo "$BIN" -verify_arch arm64 x86_64 || die "binary is not universal"
+ARCHS="$(lipo -archs "$BIN")"
+[[ "$ARCHS" == *arm64* && "$ARCHS" == *x86_64* ]] || die "binary is not universal: $ARCHS"
 [ "$("$BIN" --version)" = "$VERSION" ] || die "binary reports $("$BIN" --version), expected $VERSION"
 
 step "package ${ASSET}"
