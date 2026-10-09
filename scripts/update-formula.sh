@@ -1,53 +1,53 @@
 #!/bin/bash
+# Usage: scripts/update-formula.sh <version> [sha256]
+# Without sha256, downloads the release asset and hashes it.
+# DRY_RUN=1 prints the formula instead of pushing it to the tap.
 set -euo pipefail
 
-VERSION="${1:?usage: update-formula.sh <version>}"
+VERSION="${1:?usage: update-formula.sh <version> [sha256]}"
 REPO="icanhasjonas/icloud-tools"
 TAP_REPO="icanhasjonas/homebrew-tap"
 FORMULA_PATH="Formula/icloud-tools.rb"
-TARBALL_URL="https://github.com/${REPO}/archive/refs/tags/v${VERSION}.tar.gz"
+ASSET_URL="https://github.com/${REPO}/releases/download/v${VERSION}/icloud-${VERSION}-macos-universal.tar.gz"
 
-echo "fetching tarball sha256 for v${VERSION}..."
-SHA256=$(curl -sL "${TARBALL_URL}" | shasum -a 256 | cut -d' ' -f1)
-
-if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
-    echo "error: empty tarball -- tag v${VERSION} not found on GitHub"
-    exit 1
+SHA256="${2:-}"
+if [ -z "$SHA256" ]; then
+    echo "fetching ${ASSET_URL}..."
+    SHA256=$(curl -fsSL "${ASSET_URL}" | shasum -a 256 | cut -d' ' -f1) \
+        || { echo "error: release asset for v${VERSION} not found"; exit 1; }
 fi
-
-echo "sha256: ${SHA256}"
 
 FORMULA='class IcloudTools < Formula
   desc "CLI for managing iCloud Drive files (replacement for brctl download/evict)"
   homepage "https://github.com/'"${REPO}"'"
-  url "'"${TARBALL_URL}"'"
+  url "'"${ASSET_URL}"'"
   sha256 "'"${SHA256}"'"
   license "MIT"
 
-  depends_on xcode: ["16.0", :build]
-  depends_on :macos
+  depends_on macos: :sonoma
+
+  conflicts_with "icloudpd", because: "both install an `icloud` binary"
 
   def install
-    system "swift", "build", "-c", "release", "--disable-sandbox"
-    bin.install ".build/release/icloud"
+    bin.install "icloud"
+    generate_completions_from_executable(bin/"icloud", "--generate-completion-script")
   end
 
   test do
-    assert_match "Manage iCloud Drive", shell_output("#{bin}/icloud --help")
+    assert_equal "'"${VERSION}"'", shell_output("#{bin}/icloud --version").strip
   end
 end'
 
+if [ "${DRY_RUN:-0}" = 1 ]; then
+    echo "${FORMULA}"
+    exit 0
+fi
+
 echo "updating tap formula..."
-
-# Base64 encode for GitHub API
-ENCODED=$(echo -n "${FORMULA}" | base64)
-
-# Get current file SHA (needed for update)
 FILE_SHA=$(gh api "repos/${TAP_REPO}/contents/${FORMULA_PATH}" --jq '.sha')
-
 gh api --method PUT "repos/${TAP_REPO}/contents/${FORMULA_PATH}" \
-    -f message="Update icloud-tools to ${VERSION}" \
-    -f content="${ENCODED}" \
+    -f message="icloud-tools ${VERSION}" \
+    -f content="$(printf '%s\n' "${FORMULA}" | base64)" \
     -f sha="${FILE_SHA}" \
     --silent
 

@@ -1,15 +1,17 @@
 BINARY := icloud
 BUILD_DIR := .build
 RELEASE_BIN := $(BUILD_DIR)/release/$(BINARY)
-DEBUG_BIN := $(BUILD_DIR)/debug/$(BINARY)
 INSTALL_DIR := ~/.local/bin
 VERSION_FILE := Sources/icloud/Version.swift
 VERSION := $(shell sed -n 's/let version = "\(.*\)"/\1/p' $(VERSION_FILE))
 
-.PHONY: build release install clean bump formula version
+.PHONY: build test release install clean version publish publish-dry formula
 
 build:
 	swift build
+
+test:
+	swift test
 
 release:
 	swift build -c release --disable-sandbox
@@ -25,20 +27,16 @@ clean:
 version:
 	@echo $(VERSION)
 
-# Usage: make bump v=0.8.0
-bump:
-	@test -n "$(v)" || (echo "usage: make bump v=0.8.0" && exit 1)
-	@echo 'let version = "$(v)"' > $(VERSION_FILE)
-	@echo "bumped to $(v)"
+# Full release in one shot: make publish v=0.8.5
+publish:
+	@test -n "$(v)" || (echo "usage: make publish v=0.8.5" && exit 1)
+	@scripts/release.sh $(v)
 
-# Full release: make tag v=0.8.0
-tag: bump release
-	git add $(VERSION_FILE)
-	git commit -m "Bump version to $(v)"
-	git tag v$(v)
-	git push origin main --tags
-	@echo "tagged v$(v) and pushed"
+# Everything up to packaging, nothing committed or pushed: make publish-dry v=0.8.5
+publish-dry:
+	@test -n "$(v)" || (echo "usage: make publish-dry v=0.8.5" && exit 1)
+	@scripts/release.sh $(v) --dry-run
 
-# Update homebrew tap formula after tagging
+# Re-push the tap formula for an already-published release
 formula:
 	@scripts/update-formula.sh $(VERSION)
