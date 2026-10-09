@@ -196,7 +196,7 @@ These are why the tool exists in its current shape:
 3. **Never swallow syscall errors on the data path.** `setxattr`, `moveItem`, `copyItem`, enumeration, all check their returns.
 4. **Download waits for all dataless states.** Not just `.cloud` — `.downloading` and dataless `.local` too.
 
-50 unit tests pin these covenants. Run with `swift test`.
+54 unit tests pin these covenants. Run with `swift test`.
 
 ## Limitations
 

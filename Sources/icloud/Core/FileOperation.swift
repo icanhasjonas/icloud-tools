@@ -125,7 +125,11 @@ struct FileOperation {
 
         if dryRun {
             for d in discovered {
-                try renderer.handle(.opWouldDo(verb: verb, src: d.src, dst: d.dst, size: d.size))
+                try emitDryRun(
+                    d, verb: verb, force: force, noClobber: noClobber,
+                    pruneSource: pruneSource, updateIfMismatch: updateIfMismatch,
+                    renderer: renderer
+                )
             }
             return
         }
@@ -368,6 +372,63 @@ struct FileOperation {
                 needsDownload: Downloader.needsDownload(file)
             )
         }
+    }
+
+    /// Dry-run emission for a single discovered file. Mirrors the classification
+    /// and conflict checks the live path performs (prune/update bucketing, then
+    /// noClobber/force handling) so the preview reflects what would actually happen.
+    private static func emitDryRun(
+        _ d: Discovered, verb: FileVerb,
+        force: Bool, noClobber: Bool,
+        pruneSource: Bool, updateIfMismatch: Bool,
+        renderer: OpRenderer
+    ) throws {
+        let fm = FileManager.default
+
+        if pruneSource || updateIfMismatch {
+            switch classifyDst(d, fm: fm) {
+            case .matchesSize:
+                if pruneSource {
+                    try renderer.handle(.opPruned(verb: verb, src: d.src, dst: d.dst, size: d.size))
+                    return
+                }
+                if updateIfMismatch {
+                    try renderer.handle(.opSkipped(verb: verb, src: d.src, dst: d.dst, reason: "size matches", size: d.size))
+                    return
+                }
+            case .mismatchesSize:
+                if updateIfMismatch {
+                    try renderer.handle(.opUpdated(verb: verb, src: d.src, dst: d.dst, size: d.size))
+                    return
+                }
+            case .other:
+                break
+            }
+        }
+
+        var dstIsDir: ObjCBool = false
+        let exists = fm.fileExists(atPath: d.dst.path, isDirectory: &dstIsDir)
+        if exists {
+            if dstIsDir.boolValue {
+                let err = FileOperationError.typeMismatch(
+                    src: d.src.path, dst: d.dst.path,
+                    reason: "target path is a directory; will not delete directories"
+                )
+                try renderer.handle(.opFail(verb: verb, src: d.src, dst: d.dst, error: err))
+                return
+            }
+            if noClobber {
+                try renderer.handle(.opSkipped(verb: verb, src: d.src, dst: d.dst, reason: "exists", size: d.size))
+                return
+            }
+            if !force {
+                let err = FileOperationError.destinationExists(d.dst.path)
+                try renderer.handle(.opFail(verb: verb, src: d.src, dst: d.dst, error: err))
+                return
+            }
+            // force + exists: falls through to wouldDo (would overwrite)
+        }
+        try renderer.handle(.opWouldDo(verb: verb, src: d.src, dst: d.dst, size: d.size))
     }
 
     private enum DstClassification {

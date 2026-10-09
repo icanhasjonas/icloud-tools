@@ -38,7 +38,7 @@ final class FileOperationTests: XCTestCase {
     }
 
     @discardableResult
-    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false, pruneSource: Bool = false, updateIfMismatch: Bool = false) throws -> SilentRenderer {
+    private func runMove(_ paths: [String], force: Bool = false, noClobber: Bool = false, ignoreMissing: Bool = false, pruneSource: Bool = false, updateIfMismatch: Bool = false, dryRun: Bool = false) throws -> SilentRenderer {
         let renderer = SilentRenderer()
         let absolute = paths.map { workDir.appendingPathComponent($0).path }
         try FileOperation.execute(
@@ -50,6 +50,7 @@ final class FileOperationTests: XCTestCase {
             ignoreMissing: ignoreMissing,
             pruneSource: pruneSource,
             updateIfMismatch: updateIfMismatch,
+            dryRun: dryRun,
             renderer: renderer
         ) { fm, src, dst in
             try fm.moveItem(at: src, to: dst)
@@ -439,6 +440,60 @@ final class FileOperationTests: XCTestCase {
             XCTAssertFalse(name.contains("icloud-backup"), "backup file left behind: \(name)")
         }
     }
+
+    // MARK: - --dry-run reflects what the live run would do
+
+    func testDryRunConflictWithoutForceReportsFailure() throws {
+        try write("SRC", to: "a.txt")
+        try write("OLD", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], dryRun: true)
+
+        XCTAssertEqual(renderer.failed.count, 1, "live run would fail with destinationExists")
+        XCTAssertEqual(renderer.wouldDo.count, 0)
+        XCTAssertTrue(exists("a.txt"))
+        XCTAssertEqual(read("dst/a.txt"), "OLD")
+    }
+
+    func testDryRunNoClobberReportsSkip() throws {
+        try write("SRC", to: "a.txt")
+        try write("OLD", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], noClobber: true, dryRun: true)
+
+        XCTAssertEqual(renderer.skipped.first?.1, "exists")
+        XCTAssertEqual(renderer.wouldDo.count, 0)
+    }
+
+    func testDryRunForceReportsWouldOverwrite() throws {
+        try write("SRC", to: "a.txt")
+        try write("OLD", to: "dst/a.txt")
+
+        let renderer = try runMove(["a.txt", "dst/"], force: true, dryRun: true)
+
+        XCTAssertEqual(renderer.wouldDo.count, 1)
+        XCTAssertEqual(read("dst/a.txt"), "OLD", "dry run touches nothing")
+    }
+
+    func testDryRunPruneAndUpdateClassifyWithoutTouching() throws {
+        try write("same", to: "a.txt")
+        try write("same", to: "dst/a.txt")             // match -> would prune
+        try write("NEW BYTES HERE", to: "b.txt")
+        try write("old", to: "dst/b.txt")               // mismatch -> would update
+        try write("fresh", to: "c.txt")                 // absent -> would move
+
+        let renderer = try runMove(
+            ["a.txt", "b.txt", "c.txt", "dst/"],
+            noClobber: true, pruneSource: true, updateIfMismatch: true, dryRun: true
+        )
+
+        XCTAssertEqual(renderer.pruned.count, 1)
+        XCTAssertEqual(renderer.updated.count, 1)
+        XCTAssertEqual(renderer.wouldDo.count, 1)
+        XCTAssertTrue(exists("a.txt") && exists("b.txt") && exists("c.txt"), "sources untouched")
+        XCTAssertEqual(read("dst/b.txt"), "old", "dst untouched")
+        XCTAssertFalse(exists("dst/c.txt"))
+    }
 }
 
 /// Renderer that swallows output but records events for assertion.
@@ -448,8 +503,12 @@ private final class SilentRenderer: OpRenderer {
     private(set) var pruned: [URL] = []
     private(set) var updated: [URL] = []
     private(set) var skipped: [(URL, String)] = []
+    private(set) var failed: [URL] = []
+    private(set) var wouldDo: [URL] = []
     func handle(_ event: OpEvent) throws {
         switch event {
+        case .opFail(_, let src, _, _): failed.append(src)
+        case .opWouldDo(_, let src, _, _): wouldDo.append(src)
         case .sourceMissing(let src): missing.append(src)
         case .opPruned(_, let src, _, _): pruned.append(src)
         case .opUpdated(_, let src, _, _): updated.append(src)
